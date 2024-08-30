@@ -1,0 +1,5 @@
+*/__pycache__/
+.vscode/
+deep_mimic/mocap/data/
+*/*.npy
+*/*.pcd
