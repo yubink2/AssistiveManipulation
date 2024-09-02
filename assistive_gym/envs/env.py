@@ -13,10 +13,9 @@ from .util import Util
 # humanoid
 currentdir = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))
 parentdir = os.path.dirname(os.path.dirname(currentdir))
-parentparentdir = os.path.dirname(os.path.dirname(parentdir))
-os.sys.path.insert(0, parentparentdir)
+os.sys.path.insert(0, parentdir)
 from deep_mimic.env.motion_capture_data import MotionCaptureData
-from humanoid_with_rev_xyz import Humanoid
+from deep_mimic.mocap.humanoid_with_rev_xyz import Humanoid
 
 # robot
 from pybullet_ur5.robot import UR5Robotiq85
@@ -53,7 +52,7 @@ class AssistiveEnv(gym.Env):
         # load human
         human_base_pos = (0, 0, 0.3)
         human_base_orn = self.bc.getQuaternionFromEuler((0, 1.57, 0))
-        motionPath = 'data/Sitting1.json'
+        motionPath = 'deep_mimic/mocap/data/Sitting1.json'
         self.motion = MotionCaptureData()
         self.motion.Load(motionPath)
         self.humanoid = Humanoid(self.bc, self.motion, baseShift=human_base_pos, ornShift=human_base_orn)

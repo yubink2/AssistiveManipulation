@@ -3,9 +3,8 @@ import pybullet as p
 from scipy.spatial.transform import Rotation as R
 
 class Util:
-    def __init__(self, pid, np_random):
+    def __init__(self, pid):
         self.id = pid
-        self.np_random = np_random
 
     def draw_frame(self, position, quaternion=[0, 0, 0, 1]):
         m = R.from_quat(quaternion).as_matrix()
@@ -28,28 +27,6 @@ class Util:
         vec = pt2 - pt1
         const = r * np.linalg.norm(vec)
         return np.dot(q - pt1, vec) >= 0 and np.dot(q - pt2, vec) <= 0 and np.linalg.norm(np.cross(q - pt1, vec)) <= const
-
-    def point_on_capsule(self, p1, p2, radius, theta_range=(0, np.pi*2)):
-        '''
-        Pick a random point along the outer surface of a capsule (cylinder)
-        '''
-        # Pick a random point along the length of the capsule
-        axis_vector = p2 - p1
-        random_length = self.np_random.uniform(radius, np.linalg.norm(axis_vector))
-
-        # Normalize axis vector to unit length
-        axis_vector = axis_vector / np.linalg.norm(axis_vector)
-        ortho_vector = self.orthogonal_vector(axis_vector)
-        # Normalize orthogonal vector to unit length
-        ortho_vector = ortho_vector / np.linalg.norm(ortho_vector)
-        # Determine normal vector through cross product (this will be of unit length)
-        normal_vector = np.cross(axis_vector, ortho_vector)
-
-        # Pick a random rotation along the cylinder
-        theta = self.np_random.uniform(theta_range[0], theta_range[1])
-
-        point = p1 + random_length*axis_vector + radius*np.cos(theta)*ortho_vector + radius*np.sin(theta)*normal_vector
-        return point
 
     def capsule_points(self, p1, p2, radius, distance_between_points=0.05):
         '''
