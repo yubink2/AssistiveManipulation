@@ -22,7 +22,7 @@ class TargetsUtil:
         self.target_closer_to_eef = target_closer_to_eef
         self.robot_2_in_collision = robot_2_in_collision
 
-    def generate_new_targets_pos(self):
+    def generate_new_targets_pose(self):
         self.target_indices_to_ignore = []
         self.upperarm_length, self.upperarm_radius = 0.144000+0.036000, 0.036000
         self.forearm_length, self.forearm_radius = 0.108000+0.028000*2, 0.028000
@@ -34,6 +34,32 @@ class TargetsUtil:
         self.targets_pos_on_forearm = self.util.capsule_points(p1=np.array([0, 0, -0.01]), p2=np.array([0, 0, -self.forearm_length-0.01]), 
                                                                radius=self.forearm_radius, distance_between_points=self.distance_between_points)
         
+        # generate upperarm targets orientation
+        degree = np.rad2deg(self.distance_between_points/self.upperarm_radius)
+        col_offset = int(self.upperarm_length//self.distance_between_points)  # 6
+        row_offset = int(len(self.targets_pos_on_upperarm)/col_offset)
+        self.targets_orn_on_upperarm = []
+        for _ in range(col_offset):
+            for i in range(row_offset):
+                self.targets_orn_on_upperarm.append(self.util.rotate_quaternion_by_axis([0,0,0,1], axis='z', degrees=-degree*i-90))
+
+        # generate forearm targets orientation
+        degree = np.rad2deg(self.distance_between_points/self.forearm_radius)
+        col_offset = int(self.forearm_length//self.distance_between_points)  # 5
+        row_offset = int(len(self.targets_pos_on_forearm)/col_offset)
+        self.targets_orn_on_forearm = []
+        for _ in range(col_offset):
+            for i in range(row_offset):
+                self.targets_orn_on_forearm.append(self.util.rotate_quaternion_by_axis([0,0,0,1], axis='z', degrees=-degree*i-90))
+
+        assert len(self.targets_pos_on_upperarm) == len(self.targets_orn_on_upperarm)
+        assert len(self.targets_pos_on_forearm) == len(self.targets_orn_on_forearm)
+
+    def initialize_deleted_targets_list(self):
+        # to keep track of deleted targets
+        self.deleted_targets_indices_on_upperarm = []
+        self.deleted_targets_indices_on_forearm = []
+
     def generate_targets(self):
         assert self.targets_pos_on_upperarm is not None
         assert self.targets_pos_on_forearm is not None
@@ -55,54 +81,76 @@ class TargetsUtil:
         self.update_targets()
     
     def remove_targets(self):
-        for target in self.targets_upperarm:
-            p.removeBody(target, physicsClientId=self.pid)
-        for target in self.targets_forearm:
-            p.removeBody(target, physicsClientId=self.pid)
+        # remove upperarm targets
+        remove_targets_upperarm = []
+        for i in self.deleted_targets_indices_on_upperarm:
+            remove_targets_upperarm.append(self.targets_upperarm[i])
+        self.targets_pos_on_upperarm = [t for i, t in enumerate(self.targets_pos_on_upperarm) if i not in self.deleted_targets_indices_on_upperarm]
+        self.targets_orn_on_upperarm = [t for i, t in enumerate(self.targets_orn_on_upperarm) if i not in self.deleted_targets_indices_on_upperarm]
+        self.targets_pos_upperarm_world = [t for i, t in enumerate(self.targets_pos_upperarm_world) if i not in self.deleted_targets_indices_on_upperarm]
+        self.targets_orn_upperarm_world = [t for i, t in enumerate(self.targets_orn_upperarm_world) if i not in self.deleted_targets_indices_on_upperarm]
+        self.targets_upperarm = [t for i, t in enumerate(self.targets_upperarm) if i not in self.deleted_targets_indices_on_upperarm]
+
+        assert len(self.targets_pos_on_upperarm) == len(self.targets_pos_upperarm_world) == len(self.targets_orn_upperarm_world) == len(self.targets_upperarm)
+        # print(f'upperarm: {len(self.targets_pos_on_upperarm)}, {len(self.targets_pos_upperarm_world)}, {len(self.targets_orn_upperarm_world)}, {len(self.targets_upperarm)}')
+
+        # remove forearm targets
+        remove_targets_forearm = []
+        for i in self.deleted_targets_indices_on_forearm:
+            remove_targets_forearm.append(self.targets_forearm[i])
+        self.targets_pos_on_forearm = [t for i, t in enumerate(self.targets_pos_on_forearm) if i not in self.deleted_targets_indices_on_forearm]
+        self.targets_orn_on_forearm = [t for i, t in enumerate(self.targets_orn_on_forearm) if i not in self.deleted_targets_indices_on_forearm]
+        self.targets_pos_forearm_world = [t for i, t in enumerate(self.targets_pos_forearm_world) if i not in self.deleted_targets_indices_on_forearm]
+        self.targets_orn_forearm_world = [t for i, t in enumerate(self.targets_orn_forearm_world) if i not in self.deleted_targets_indices_on_forearm]
+        self.targets_forearm = [t for i, t in enumerate(self.targets_forearm) if i not in self.deleted_targets_indices_on_forearm]
+
+        assert len(self.targets_pos_on_forearm) == len(self.targets_pos_forearm_world) == len(self.targets_orn_forearm_world) == len(self.targets_forearm)
+        # print(f'upperarm: {len(self.targets_pos_on_forearm)}, {len(self.targets_pos_forearm_world)}, {len(self.targets_orn_forearm_world)}, {len(self.targets_forearm)}')
+
+        # # remove from simulation
+        # for target in remove_targets_upperarm:
+        #     p.removeBody(target, physicsClientId=self.pid)
+        # for target in remove_targets_forearm:
+        #     p.removeBody(target, physicsClientId=self.pid)
+
+        self.initialize_deleted_targets_list()  # reset to empty list
 
     def update_targets(self):
-        # upperarm targets position
+        # upperarm targets position & orientation
         upperarm_pos, upperarm_orient = p.getLinkState(self.humanoid_id, self.right_shoulder, computeForwardKinematics=True, physicsClientId=self.pid)[4:6]
-        upperarm_orn = self.util.rotate_quaternion_by_axis(upperarm_orient, axis='y', degrees=-90)  #####
         upperarm_orient = self.util.rotate_quaternion_by_axis(upperarm_orient, axis='x', degrees=-90)
         self.targets_pos_upperarm_world = []
-        for target_pos_on_arm, target in zip(self.targets_pos_on_upperarm, self.targets_upperarm):
-            target_pos, target_orn = p.multiplyTransforms(upperarm_pos, upperarm_orient, target_pos_on_arm, [0, 0, 0, 1], physicsClientId=self.pid)
+        self.targets_orn_upperarm_world = []
+        for target_pos_on_arm, target_orn_on_arm, target in zip(self.targets_pos_on_upperarm, self.targets_orn_on_upperarm, self.targets_upperarm):
+            target_pos, target_orn = p.multiplyTransforms(upperarm_pos, upperarm_orient, target_pos_on_arm, target_orn_on_arm, physicsClientId=self.pid)
             self.targets_pos_upperarm_world.append(target_pos)
+            self.targets_orn_upperarm_world.append(target_orn)
             p.resetBasePositionAndOrientation(target, target_pos, target_orn, physicsClientId=self.pid)
 
-        # forearm targets position
+        # forearm targets position & orientation
         forearm_pos, forearm_orient = p.getLinkState(self.humanoid_id, self.right_elbow, computeForwardKinematics=True, physicsClientId=self.pid)[4:6]
-        forearm_orn = self.util.rotate_quaternion_by_axis(forearm_orient, axis='y', degrees=-90)  #####
         forearm_orient = self.util.rotate_quaternion_by_axis(forearm_orient, axis='x', degrees=-90)
         self.targets_pos_forearm_world = []
-        for target_pos_on_arm, target in zip(self.targets_pos_on_forearm, self.targets_forearm):
-            target_pos, target_orn = p.multiplyTransforms(forearm_pos, forearm_orient, target_pos_on_arm, [0, 0, 0, 1], physicsClientId=self.pid)
+        self.targets_orn_forearm_world = []
+        for target_pos_on_arm, target_orn_on_arm, target in zip(self.targets_pos_on_forearm, self.targets_orn_on_forearm, self.targets_forearm):
+            target_pos, target_orn = p.multiplyTransforms(forearm_pos, forearm_orient, target_pos_on_arm, target_orn_on_arm, physicsClientId=self.pid)
             self.targets_pos_forearm_world.append(target_pos)
+            self.targets_orn_forearm_world.append(target_orn)
             p.resetBasePositionAndOrientation(target, target_pos, target_orn, physicsClientId=self.pid)
 
-        # upperarm targets orientation
-        degree = np.rad2deg(self.distance_between_points/self.upperarm_radius)
-        col_offset = int(self.upperarm_length//self.distance_between_points)  # 6
-        row_offset = int(len(self.targets_upperarm)/col_offset)  # 7
-        self.targets_orn_upperarm_world = []
-        for _ in range(col_offset):
-            for i in range(row_offset):
-                self.targets_orn_upperarm_world.append(self.util.rotate_quaternion_by_axis(upperarm_orn, axis='y', degrees=-degree*i))
-
-        # forearm targets orientation
-        degree = np.rad2deg(self.distance_between_points/self.forearm_radius)
-        col_offset = int(self.forearm_length//self.distance_between_points)  # 5
-        row_offset = int(len(self.targets_forearm)/col_offset)  # 5
-        self.targets_orn_forearm_world = []
-        for _ in range(col_offset):
-            for i in range(row_offset):
-                self.targets_orn_forearm_world.append(self.util.rotate_quaternion_by_axis(forearm_orn, axis='y', degrees=-degree*i))
+        # for target_pos, target_orn in zip(self.targets_pos_upperarm_world, self.targets_orn_upperarm_world):
+        #     self.util.draw_frame(target_pos, target_orn)
+        # print('h')
 
     def mark_feasible_targets(self):
         # change color for feasible targets
         for target in self.feasible_targets:
             p.changeVisualShape(target, -1, rgbaColor=[0, 0.2, 1, 1], physicsClientId=self.pid)
+
+    def unmark_feasible_targets(self):
+        # change color for feasible targets
+        for target in self.feasible_targets:
+            p.changeVisualShape(target, -1, rgbaColor=[0, 1, 1, 1], physicsClientId=self.pid)
         
     def reorder_feasible_targets(self, targeted_arm):
         if targeted_arm == 'upperarm':
@@ -112,19 +160,21 @@ class TargetsUtil:
         else:
             raise ValueError('invalid targeted arm! must be upperarm or forearm..')
 
-        feasible_targets_pos = []
+        # feasible_targets_pos = []
         feasible_targets_pos_world = []
         feasible_targets_orn_world = []
         feasible_targets = []
+        feasible_targets_indices = []
         row_offset = len(self.feasible_targets)//col_offset
 
         for i in range(row_offset):
             for j in range(col_offset):
                 index = i + row_offset*j
-                feasible_targets_pos.append(self.feasible_targets_pos[index])
+                # feasible_targets_pos.append(self.feasible_targets_pos[index])
                 feasible_targets_pos_world.append(self.feasible_targets_pos_world[index])
                 feasible_targets_orn_world.append(self.feasible_targets_orn_world[index])
                 feasible_targets.append(self.feasible_targets[index])
+                feasible_targets_indices.append(self.feasible_targets_indices[index])
 
         def reverse_alternate_rows(feasible_targets, col_offset):
             total_rows = row_offset
@@ -148,15 +198,17 @@ class TargetsUtil:
             
             return new_feasible_targets
         
-        feasible_targets_pos = reverse_alternate_rows(feasible_targets_pos, col_offset)
+        # feasible_targets_pos = reverse_alternate_rows(feasible_targets_pos, col_offset)
         feasible_targets_pos_world = reverse_alternate_rows(feasible_targets_pos_world, col_offset)
         feasible_targets_orn_world = reverse_alternate_rows(feasible_targets_orn_world, col_offset)
         feasible_targets = reverse_alternate_rows(feasible_targets, col_offset)
+        feasible_targets_indices = reverse_alternate_rows(feasible_targets_indices, col_offset)
 
-        self.feasible_targets_pos = feasible_targets_pos
+        # self.feasible_targets_pos = feasible_targets_pos
         self.feasible_targets_pos_world = feasible_targets_pos_world
         self.feasible_targets_orn_world = feasible_targets_orn_world
         self.feasible_targets = feasible_targets
+        self.feasible_targets_indices = feasible_targets_indices
 
     def get_feasible_targets_pos(self, targeted_arm):
         # randomize order of trial
@@ -197,10 +249,10 @@ class TargetsUtil:
             front_targets_on_upperarm_indices, back_targets_on_upperarm_indices = split_half(self.targets_pos_on_upperarm, axis)
             front_targets_on_forearm_indices, back_targets_on_forearm_indices = split_half(self.targets_pos_on_forearm, axis)
             
-            self.target_pos_dict = {'upperarm_front': np.array(self.targets_pos_on_upperarm)[front_targets_on_upperarm_indices],
-                                    'upperarm_back': np.array(self.targets_pos_on_upperarm)[back_targets_on_upperarm_indices],
-                                    'forearm_front': np.array(self.targets_pos_on_forearm)[front_targets_on_forearm_indices],
-                                    'forearm_back': np.array(self.targets_pos_on_forearm)[back_targets_on_forearm_indices]}
+            # self.target_pos_dict = {'upperarm_front': np.array(self.targets_pos_on_upperarm)[front_targets_on_upperarm_indices],
+            #                         'upperarm_back': np.array(self.targets_pos_on_upperarm)[back_targets_on_upperarm_indices],
+            #                         'forearm_front': np.array(self.targets_pos_on_forearm)[front_targets_on_forearm_indices],
+            #                         'forearm_back': np.array(self.targets_pos_on_forearm)[back_targets_on_forearm_indices]}
             self.target_pos_world_dict = {'upperarm_front': np.array(self.targets_pos_upperarm_world)[front_targets_on_upperarm_indices],
                                           'upperarm_back': np.array(self.targets_pos_upperarm_world)[back_targets_on_upperarm_indices],
                                           'forearm_front': np.array(self.targets_pos_forearm_world)[front_targets_on_forearm_indices],
@@ -227,7 +279,7 @@ class TargetsUtil:
 
                 # set flag & targets
                 self.target_order_flags[order_key] = True
-                targets_pos = self.target_pos_dict[order_key]
+                # targets_pos = self.target_pos_dict[order_key]
                 targets_pos_world = self.target_pos_world_dict[order_key]
                 targets_orn_world = self.target_orn_world_dict[order_key]
                 targets = self.target_dict[order_key]
@@ -259,6 +311,9 @@ class TargetsUtil:
                 # compute desired world_to_eef (initial robot config)
                 world_to_eef = p.multiplyTransforms(self.world_to_target_point[0], self.world_to_target_point[1],
                                                     self.target_to_eef[0], self.target_to_eef[1], physicsClientId=self.pid)
+                
+                # self.util.draw_frame(self.world_to_target_point[0], self.world_to_target_point[1])
+                # self.util.draw_frame(world_to_eef[0], world_to_eef[1])
                 
                 # set robot initial joint state
                 q_robot_2 = p.calculateInverseKinematics(self.robot_2.id, self.robot_2.eef_id, world_to_eef[0], world_to_eef[1],
@@ -310,7 +365,7 @@ class TargetsUtil:
                     self.target_order_flags[order_key] = False
                     continue
 
-                self.feasible_targets_pos = targets_pos
+                # self.feasible_targets_pos = targets_pos
                 self.feasible_targets_pos_world = targets_pos_world
                 self.feasible_targets_orn_world = targets_orn_world
                 self.feasible_targets = targets
@@ -350,30 +405,20 @@ class TargetsUtil:
                 # Remove contacted target from the list
                 if len(indices_to_delete) == 0:
                     continue
-                print(f'indices_to_delete: {indices_to_delete}, self.feasible_targets_pos: {self.feasible_targets_pos[indices_to_delete[0]]}')
-                self.feasible_targets_pos = [t for i, t in enumerate(self.feasible_targets_pos) if i not in indices_to_delete]
+                # print(f'indices_to_delete: {indices_to_delete}, self.feasible_targets_pos: {self.feasible_targets_pos[indices_to_delete[0]]}')
+
+                # self.feasible_targets_pos = [t for i, t in enumerate(self.feasible_targets_pos) if i not in indices_to_delete]
                 self.feasible_targets = [t for i, t in enumerate(self.feasible_targets) if i not in indices_to_delete]
                 self.feasible_targets_pos_world = [t for i, t in enumerate(self.feasible_targets_pos_world) if i not in indices_to_delete]
 
-                # arm_indices_to_delete = []
-                # for i in indices_to_delete:
-                #     arm_indices_to_delete.append(self.feasible_targets_indices[i])
-                # if len(arm_indices_to_delete) == 0:
-                #     continue
-
-                # if targeted_arm == 'upperarm':
-                #     print(f'arm_indices_to_delete: {arm_indices_to_delete}, self.targets_pos_on_upperarm: {self.targets_pos_on_upperarm[arm_indices_to_delete[0]]}')
-                #     self.targets_pos_on_upperarm = [t for i, t in enumerate(self.targets_pos_on_upperarm) if i not in arm_indices_to_delete]
-                #     self.targets_upperarm = [t for i, t in enumerate(self.targets_upperarm) if i not in arm_indices_to_delete]
-                #     self.targets_pos_upperarm_world = [t for i, t in enumerate(self.targets_pos_upperarm_world) if i not in arm_indices_to_delete]
-                # elif targeted_arm == 'forearm':
-                #     self.targets_pos_on_forearm = [t for i, t in enumerate(self.targets_pos_on_forearm) if i not in arm_indices_to_delete]
-                #     self.targets_forearm = [t for i, t in enumerate(self.targets_forearm) if i not in arm_indices_to_delete]
-                #     self.targets_pos_forearm_world = [t for i, t in enumerate(self.targets_pos_forearm_world) if i not in arm_indices_to_delete]
-                # else:
-                #     raise ValueError('invalid targeted arm! must be upperarm or forearm..')
+                for i in indices_to_delete:
+                    if targeted_arm == 'upperarm':
+                        self.deleted_targets_indices_on_upperarm.append(self.feasible_targets_indices[i])
+                    elif targeted_arm == 'forearm':
+                        self.deleted_targets_indices_on_forearm.append(self.feasible_targets_indices[i])
+                    else:
+                        raise ValueError('invalid targeted arm! must be upperarm or forearm..')
                 
-                # # self.feasible_targets_indices = [t for i, t in enumerate(self.feasible_targets_indices) if i not in indices_to_delete]
-                # self.feasible_targets_indices = [self.feasible_targets_indices[i] for i in range(len(self.feasible_targets_indices)) if i not in indices_to_delete]
+                self.feasible_targets_indices = [t for i, t in enumerate(self.feasible_targets_indices) if i not in indices_to_delete]
 
         return new_contact_points

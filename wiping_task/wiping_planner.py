@@ -35,22 +35,26 @@ class WipingDemo():
                                             self.robot_2, self.tool,
                                             self.target_to_eef, self.target_closer_to_eef, self.robot_2_in_collision)
         
+        self.targets_util.generate_new_targets_pose()
+        self.targets_util.generate_targets()
+        self.targets_util.initialize_deleted_targets_list()
+        
+    def reset_wiping_setup(self, q_H, targeted_arm):
         # q_H = [2.4790802489002552, -0.01642306738465106, -1.8128412472566666, 0.4529190452054409]
-        q_H = [1.8, 0, -1.6, 0.45]
+        # q_H = [2.4790802489002552, 0.5, -1.8128412472566666, 1.0]
+        # q_H = [1.8, 0, -1.6, 0.45]
         # q_H = [3.0, 0, -1.6, 1.0]
         self.reset_human_arm(q_H)
         self.lock_human_joints(q_H)
-
-        self.targets_util.generate_new_targets_pos()
-        self.targets_util.generate_targets()
+        self.targets_util.update_targets()
 
         # feasible targets
-        feasible_targets_found = self.targets_util.get_feasible_targets_pos(targeted_arm='upperarm')
+        feasible_targets_found = self.targets_util.get_feasible_targets_pos(targeted_arm=targeted_arm)
         if not feasible_targets_found:
-            raise ValueError('feasible targets not found!')
-        self.targets_util.reorder_feasible_targets(targeted_arm='upperarm')
+            return feasible_targets_found
+        
+        self.targets_util.reorder_feasible_targets(targeted_arm=targeted_arm)
         self.targets_util.mark_feasible_targets()
-
         return feasible_targets_found
 
     def create_world(self):
@@ -148,6 +152,12 @@ class WipingDemo():
                             childFramePosition=(0, 0, 0),
                             childFrameOrientation=(0, 0, 0),
                             physicsClientId=self.bc._client)
+        
+    def detach_tool(self):
+        if self.cid is not None:
+            self.bc.removeConstraint(self.cid)
+        self.cid = None
+        self.bc.resetBasePositionAndOrientation(self.tool, [100,100,100], [0,0,0,1], physicsClientId=self.bc._client)
 
     def compute_feasible_targets_robot_traj(self):
         robot_traj = []
@@ -222,40 +232,82 @@ class WipingDemo():
         for i, j in enumerate(self.human_controllable_joints):
             self.bc.resetJointState(self.humanoid._humanoid, jointIndex=j, targetValue=q_human[i], targetVelocity=0, physicsClientId=self.bc._client)
 
+    def generate_random_q_H(self):
+        q_H_1 = np.random.uniform(-3.14, 3.14)
+        q_H_2 = np.random.uniform(-0.24, 1.23)
+        q_H_3 = np.random.uniform(-2.66, -1.32)
+        q_H_4 = np.random.uniform(0.40, 2.54)
+        return [q_H_1, q_H_2, q_H_3, q_H_4]
+    
+    def human_in_collision(self):
+        """Check if any part of the human arm collides with other objects."""
+        contact_points = self.bc.getContactPoints(bodyA=self.humanoid._humanoid, physicsClientId=self.bc._client)
+        for point in contact_points:
+            if (point[2] in [self.bed_id, self.cube_id, self.robot_2.id]):
+                return True
+        return False
+
+    def reset_and_check(self):
+        """Reset the human arm and check for collisions until no collision is detected."""
+        while True:
+            q_H = self.generate_random_q_H()
+            self.reset_human_arm(q_H)
+            self.bc.stepSimulation(physicsClientId=self.bc._client)
+            if not self.human_in_collision():
+                self.lock_human_joints(q_H)
+                print(f'q_H: {q_H}')
+                break
 
 if __name__ == '__main__':
 
     env = WipingDemo()
     env.reset()
-    robot_traj = env.compute_feasible_targets_robot_traj()
-    robot_traj = env.interpolate_trajectory(robot_traj, alpha=0.5)
-    robot_traj = env.interpolate_trajectory(robot_traj, alpha=0.25)
 
-    # initialize environment
-    for _ in range(50):
-        env.reset_robot(env.robot_2, env.targets_util.init_q_R)
-        env.bc.stepSimulation()
-    env.attach_tool()
+    q_Hs = [[2.4790802489002552, -0.01642306738465106, -1.8128412472566666, 0.4529190452054409],
+            [0, 0, -1.6, 1.0],
+            [1.8, 1.0, -2.6, 1.5]]
+    arms = ['upperarm', 'forearm']
+    total_targets_cleared = 0
 
-    # ###
-    # q_H = [1.8, 0, -1.6, 0.45]
-    # env.reset_human_arm(q_H)
-    # env.lock_human_joints(q_H)
-    # env.targets_util.update_targets()
-    # ###
+    for q_H in q_Hs:
+        for arm in arms:
+            feasible_targets_found = env.reset_wiping_setup(q_H, arm)
+            if not feasible_targets_found:
+                print(f'{q_H}, {arm}, feasible targets not found!')
+                continue
+            
+            robot_traj = env.compute_feasible_targets_robot_traj()
+            # robot_traj = env.interpolate_trajectory(robot_traj, alpha=0.5)
+            # robot_traj = env.interpolate_trajectory(robot_traj, alpha=0.25)
 
-    # execute wiping trajectory
-    targets_cleared = 0
-    for q_R in robot_traj:
-        env.move_robot(env.robot_2, q_R)
-        for _ in range(50):
-            env.bc.stepSimulation()
-        new_target = env.targets_util.get_new_contact_points(targeted_arm='upperarm')
-        targets_cleared += new_target
-        print(f'targets_cleared: {targets_cleared}')
-        time.sleep(0.3)
+            # reset to initial config
+            for _ in range(50):
+                env.reset_robot(env.robot_2, env.targets_util.init_q_R)
+                env.bc.stepSimulation()
+            env.attach_tool()
+
+            # execute wiping trajectory
+            targets_cleared = 0
+            for q_R in robot_traj:
+                env.move_robot(env.robot_2, q_R)
+                for _ in range(50):
+                    env.bc.stepSimulation()
+                new_target = env.targets_util.get_new_contact_points(targeted_arm=arm)
+                targets_cleared += new_target
+                total_targets_cleared += new_target
+                time.sleep(0.3)
+            print(f'targets_cleared: {targets_cleared}, total_targets_cleared: {total_targets_cleared}')
+            print(f'wiping {arm} is done')
+
+            env.targets_util.remove_targets()
+            env.targets_util.unmark_feasible_targets()
+            env.targets_util.update_targets()
+            env.detach_tool()
+
+            time.sleep(2)
     
-    # q_H = [1.8, 0, -1.6, 0.45]
+    # env.targets_util.remove_targets()
+    # # q_H = [1.8, 0, -1.6, 0.45]
     # env.reset_human_arm(q_H)
     # env.lock_human_joints(q_H)
     # env.targets_util.update_targets()

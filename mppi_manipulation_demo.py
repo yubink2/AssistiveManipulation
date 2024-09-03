@@ -56,7 +56,7 @@ LINK_SKELETON = [
 ]
 
 
-class HumanDemo():
+class ManipulationDemo():
     def __init__(self):
         self.bc = BulletClient(connection_mode=p.GUI)
         self.bc.setAdditionalSearchPath(pybullet_data.getDataPath())
@@ -554,7 +554,7 @@ class HumanDemo():
             return False
 
 if __name__ == '__main__':
-    env = HumanDemo()
+    env = ManipulationDemo()
     env.init_traj_planner()
     env.init_traj_follower()
 
