@@ -1,6 +1,8 @@
+__pycache__/
 */__pycache__/
 */*/__pycache__/
 .vscode/
 deep_mimic/mocap/data/
 */*.npy
 */*.pcd
+frames/

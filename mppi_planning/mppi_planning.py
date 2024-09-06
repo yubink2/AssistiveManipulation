@@ -259,23 +259,22 @@ class MPPI():
 
         # Initialize action and state rollouts
         if self.num_steps == 0:
-            # initial_state_rollout = torch.zeros((2,self.nx)).to(dtype=self.dtype, device=self.d)
-            # initial_state_rollout[0] = self.state
-            # initial_state_rollout[1] = self.goal
+            if len(self.init_traj) == 0:
+                initial_state_rollout = torch.zeros((2,self.nx)).to(dtype=self.dtype, device=self.d)
+                initial_state_rollout[0] = self.state
+                initial_state_rollout[1] = self.goal
 
-            # num_waypoints = max(int(torch.floor(torch.linalg.norm(self.goal - self.state) * self.waypoint_density)), 2)
-            # initial_state_rollout_interpolated = torch.nn.functional.interpolate(initial_state_rollout.unsqueeze(0).transpose(1,2), size=num_waypoints, mode='linear', align_corners=True).transpose(1,2).squeeze(0)
-            # self.state_rollout = initial_state_rollout_interpolated
+                num_waypoints = max(int(torch.floor(torch.linalg.norm(self.goal - self.state) * self.waypoint_density)), 2)
+                initial_state_rollout_interpolated = torch.nn.functional.interpolate(initial_state_rollout.unsqueeze(0).transpose(1,2), size=num_waypoints, mode='linear', align_corners=True).transpose(1,2).squeeze(0)
+                self.state_rollout = initial_state_rollout_interpolated
+            else:  #####
+                initial_state_rollout = self.init_traj
 
-            ### TODO
-            initial_state_rollout = self.init_traj
+                # Upsample current trajectory
+                interpolated_state_rollout = torch.nn.functional.interpolate(initial_state_rollout.unsqueeze(0).transpose(1,2), size=500, mode='linear', align_corners=True).transpose(1,2).squeeze(0)
 
-            # Upsample current trajectory
-            interpolated_state_rollout = torch.nn.functional.interpolate(initial_state_rollout.unsqueeze(0).transpose(1,2), size=500, mode='linear', align_corners=True).transpose(1,2).squeeze(0)
-
-            # Downsample trajectory
-            self.state_rollout = self._downsample_trajectory(interpolated_state_rollout, 1.0/self.waypoint_density)
-            ###
+                # Downsample trajectory
+                self.state_rollout = self._downsample_trajectory(interpolated_state_rollout, 1.0/self.waypoint_density)
 
             self.action_rollout = torch.roll(self.state_rollout, -1, dims=0) - self.state_rollout
             self.action_rollout[-1] = 0.0

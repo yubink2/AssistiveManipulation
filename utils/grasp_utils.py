@@ -57,12 +57,12 @@ def get_human_arm_pcd_for_grasp(env, scale=None, scale_radius=None, scale_height
     dict = {'xyz': pcd}
     return dict
 
-def get_human_arm_pcd_for_grasp_sampler(env, scale=None, scale_radius=None, scale_height=None):
+def get_human_arm_pcd_for_grasp_sampler(env, scale=None, scale_radius=None, scale_height=None, client_id=0):
     # right_shoulder_pcd = get_point_cloud_from_collision_shapes_specific_link(env.humanoid._humanoid, env.right_shoulder, resolution=30, 
     #                                                                       scale_radius=scale_radius, scale_height=scale_height)
     right_elbow_pcd = get_point_cloud_from_collision_shapes_specific_link(env.humanoid._humanoid, env.right_elbow, resolution=40, 
                                                                           scale_radius=scale_radius, scale_height=scale_height,
-                                                                          skip_hemispherical=True)
+                                                                          skip_hemispherical=True, client_id=client_id)
     # right_wrist_pcd = get_point_cloud_from_collision_shapes_specific_link(env.humanoid._humanoid, env.right_wrist, resolution=20, 
     #                                                                       scale_radius=scale_radius, scale_height=scale_height)
     # pcd = np.vstack((right_elbow_pcd, right_wrist_pcd))

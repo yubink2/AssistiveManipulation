@@ -56,7 +56,7 @@ LINK_SKELETON = [
 ]
 
 
-class ManipulationDemo():
+class HumanDemo():
     def __init__(self):
         self.bc = BulletClient(connection_mode=p.GUI)
         self.bc.setAdditionalSearchPath(pybullet_data.getDataPath())
@@ -223,9 +223,9 @@ class ManipulationDemo():
         self.bc.stepSimulation()
 
         # grasp generation
-        # q_R_grasp_samples, grasp_pose_samples = self.generate_grasps(self.q_human_init)
-        q_R_grasp_samples = [[-3.1261986468629, -1.8338786433187777, 1.4256020802013456, -0.9043742581934993, 0.004010565930590675, 1.3107086767560772]]
-        grasp_pose_samples = [[[0.16082333042308455, 0.4625005289272614, 0.6342929578230712], [0.707388044876899, -0.7068249569936026, -0.0005628637715330792, 0.0005633121735972125]]]
+        q_R_grasp_samples, grasp_pose_samples = self.generate_grasps(self.q_human_init)
+        # q_R_grasp_samples = [[-3.1261986468629, -1.8338786433187777, 1.4256020802013456, -0.9043742581934993, 0.004010565930590675, 1.3107086767560772]]
+        # grasp_pose_samples = [[[0.16082333042308455, 0.4625005289272614, 0.6342929578230712], [0.707388044876899, -0.7068249569936026, -0.0005628637715330792, 0.0005633121735972125]]]
 
         # collision check of the grasp for goal config
         count = -1
@@ -306,7 +306,6 @@ class ManipulationDemo():
                 final_eef_to_cp.append(eef_to_cp)
                 final_q_R_traj.append(q_R_traj)
 
-                # dist_cp = np.linalg.norm(np.array(world_to_right_elbow[0]) - np.array(world_to_cp[0]))
                 if dist < min_dist_cp:
                     min_dist_cp_idx = count
 
@@ -554,7 +553,7 @@ class ManipulationDemo():
             return False
 
 if __name__ == '__main__':
-    env = ManipulationDemo()
+    env = HumanDemo()
     env.init_traj_planner()
     env.init_traj_follower()
 

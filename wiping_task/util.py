@@ -15,7 +15,7 @@ class Util:
             vec = m[:, column]
             from_p = position
             to_p = position + (vec * 0.1)
-            p.addUserDebugLine(from_p, to_p, color, lineWidth=3, lifeTime=0)
+            p.addUserDebugLine(from_p, to_p, color, lineWidth=3, lifeTime=0, physicsClientId=self.id)
 
     def rotate_quaternion_by_axis(self, quaternion, axis='y', degrees=-90):
         rotation = R.from_euler(axis, degrees, degrees=True).as_quat()

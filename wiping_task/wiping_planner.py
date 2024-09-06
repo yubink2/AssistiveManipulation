@@ -22,9 +22,13 @@ from wiping_task.util import Util
 from wiping_task.targets_util import TargetsUtil
 
 class WipingDemo():
-    def __init__(self):
+    def __init__(self, gui=False):
         # Start the bullet physics server
-        self.bc = BulletClient(connection_mode=p.GUI)
+        self.gui = gui
+        if self.gui:
+            self.bc = BulletClient(connection_mode=p.GUI)
+        else:
+            self.bc = BulletClient(connection_mode=p.DIRECT)
         self.util = Util(self.bc)
         self.targets_util = TargetsUtil(self.bc._client, self.util)
 
@@ -40,10 +44,6 @@ class WipingDemo():
         self.targets_util.initialize_deleted_targets_list()
         
     def reset_wiping_setup(self, q_H, targeted_arm):
-        # q_H = [2.4790802489002552, -0.01642306738465106, -1.8128412472566666, 0.4529190452054409]
-        # q_H = [2.4790802489002552, 0.5, -1.8128412472566666, 1.0]
-        # q_H = [1.8, 0, -1.6, 0.45]
-        # q_H = [3.0, 0, -1.6, 1.0]
         self.reset_human_arm(q_H)
         self.lock_human_joints(q_H)
         self.targets_util.update_targets()
@@ -63,7 +63,7 @@ class WipingDemo():
 
         # load environment
         plane_id = self.bc.loadURDF("plane.urdf", (0, 0, -0.04), physicsClientId=self.bc._client)
-        bed_id = self.bc.loadURDF("./urdf/bed_0.urdf", (0.0, -0.1, 0.0), useFixedBase=True, physicsClientId=self.bc._client)
+        self.bed_id = self.bc.loadURDF("./urdf/bed_0.urdf", (0.0, -0.1, 0.0), useFixedBase=True, physicsClientId=self.bc._client)
 
         # load human
         human_base_pos = (0, 0, 0.3)
@@ -79,25 +79,33 @@ class WipingDemo():
         self.human_controllable_joints = [3, 4, 5, 7]
         self.human_right_arm = [3, 4, 5, 6, 7, 8]
 
-        # load second robot
+        # load first robot (manipulation)
+        self.robot_base_pose = ((0.65, 0.7, 0.25), (0, 0, -1.57))
+        self.cube_id = self.bc.loadURDF("./urdf/cube_0.urdf", 
+                                   (self.robot_base_pose[0][0], self.robot_base_pose[0][1], self.robot_base_pose[0][2]-0.15), useFixedBase=True)
+        self.robot = UR5Robotiq85(self.bc, self.robot_base_pose[0], self.robot_base_pose[1])
+        self.robot.load()
+        for _ in range(50):
+            self.robot.reset()
+            self.robot.open_gripper()
+
+        # load second robot (wiping)
         self.robot_2_base_pose = ((0.65, 0, 0.25), (0, 0, -1.57))
-        cube_id = p.loadURDF("./urdf/cube_0.urdf", 
+        self.cube_2_id = p.loadURDF("./urdf/cube_0.urdf", 
                             (self.robot_2_base_pose[0][0], self.robot_2_base_pose[0][1], self.robot_2_base_pose[0][2]-0.15), useFixedBase=True,
                             physicsClientId=self.bc._client)
         self.robot_2 = UR5Robotiq85(self.bc, self.robot_2_base_pose[0], self.robot_2_base_pose[1])
         self.robot_2.load()
         self.robot_2.reset()
 
-        self.bed_id = bed_id
-        self.cube_id = cube_id
         self.targets_pos_on_upperarm = None
         self.targets_pos_on_forearm = None
 
         # initialize collision checker
-        obstacles = [self.bed_id, self.humanoid._humanoid]
+        obstacles = [self.bed_id, self.humanoid._humanoid, self.robot.id, self.cube_id]
         self.robot_2_in_collision = get_collision_fn(self.robot_2.id, self.robot_2.arm_controllable_joints, obstacles=obstacles,
                                                      attachments=[], self_collisions=True,
-                                                     disabled_collisions=set())
+                                                     disabled_collisions=set(), client_id=self.bc._client)
         
         # compute target_to_eef & target_closer_to_eef
         world_to_eef = self.bc.getLinkState(self.robot_2.id, self.robot_2.eef_id, computeForwardKinematics=True, physicsClientId=self.bc._client)[:2]
@@ -132,6 +140,9 @@ class WipingDemo():
         for j in self.robot_2.arm_controllable_joints:
             for tj in list(range(self.bc.getNumJoints(self.tool, physicsClientId=self.bc._client))) + [-1]:
                 self.bc.setCollisionFilterPair(self.robot_2.id, self.tool, j, tj, False, physicsClientId=self.bc._client)
+
+        if not self.gui:
+            self.bc.resetBasePositionAndOrientation(self.tool, [100,100,100], [0,0,0,1], physicsClientId=self.bc._client)
         
     def attach_tool(self):
         # reset tool and attach it to eef
@@ -243,25 +254,47 @@ class WipingDemo():
         """Check if any part of the human arm collides with other objects."""
         contact_points = self.bc.getContactPoints(bodyA=self.humanoid._humanoid, physicsClientId=self.bc._client)
         for point in contact_points:
-            if (point[2] in [self.bed_id, self.cube_id, self.robot_2.id]):
+            if (point[2] in [self.bed_id, self.cube_id, self.cube_2_id, self.robot.id, self.robot_2.id]):
                 return True
         return False
 
-    def reset_and_check(self):
+    def get_valid_q_H(self):
         """Reset the human arm and check for collisions until no collision is detected."""
-        while True:
+        for _ in range(1000):
             q_H = self.generate_random_q_H()
             self.reset_human_arm(q_H)
             self.bc.stepSimulation(physicsClientId=self.bc._client)
             if not self.human_in_collision():
                 self.lock_human_joints(q_H)
-                print(f'q_H: {q_H}')
-                break
+                world_to_right_elbow = self.bc.getLinkState(self.humanoid._humanoid, self.right_elbow)[:2]
+                return q_H, world_to_right_elbow
+        raise ValueError('valid human config not found!')
+
+    def lock_robot_arm_joints(self, robot, q_robot):
+        # Make all joints static by setting mass of each link (joint) to 0
+        for j in range(self.bc.getNumJoints(robot.id, physicsClientId=self.bc._client)):
+            self.bc.changeDynamics(robot.id, j, mass=0, physicsClientId=self.bc._client)
+        # Set arm joints velocities to 0
+        for i, joint_id in enumerate(robot.arm_controllable_joints):
+            self.bc.resetJointState(self.robot.id, jointIndex=joint_id, targetValue=q_robot[i], targetVelocity=0, physicsClientId=self.bc._client)
+
+    def get_robot_joint_angles(self, robot):
+        current_joint_angles = []
+        for joint_id in robot.arm_controllable_joints:
+            current_joint_angles.append(self.bc.getJointState(robot.id, joint_id)[0])
+        return current_joint_angles
+
+    def get_human_joint_angles(self):
+        current_joint_angles = []
+        for joint_id in self.human_controllable_joints:
+            current_joint_angles.append(self.bc.getJointState(self.humanoid._humanoid, joint_id)[0])
+        return current_joint_angles
 
 if __name__ == '__main__':
 
-    env = WipingDemo()
+    env = WipingDemo(gui=True)
     env.reset()
+    env.lock_robot_arm_joints(env.robot, env.robot.arm_rest_poses)
 
     q_Hs = [[2.4790802489002552, -0.01642306738465106, -1.8128412472566666, 0.4529190452054409],
             [0, 0, -1.6, 1.0],
@@ -277,13 +310,14 @@ if __name__ == '__main__':
                 continue
             
             robot_traj = env.compute_feasible_targets_robot_traj()
+            if len(robot_traj) == 0:
+                continue
             # robot_traj = env.interpolate_trajectory(robot_traj, alpha=0.5)
             # robot_traj = env.interpolate_trajectory(robot_traj, alpha=0.25)
 
             # reset to initial config
             for _ in range(50):
                 env.reset_robot(env.robot_2, env.targets_util.init_q_R)
-                env.bc.stepSimulation()
             env.attach_tool()
 
             # execute wiping trajectory
@@ -292,7 +326,8 @@ if __name__ == '__main__':
                 env.move_robot(env.robot_2, q_R)
                 for _ in range(50):
                     env.bc.stepSimulation()
-                new_target = env.targets_util.get_new_contact_points(targeted_arm=arm)
+                new_target, indices_to_delete = env.targets_util.get_new_contact_points(targeted_arm=arm)
+                env.targets_util.remove_contacted_feasible_targets(indices_to_delete, arm)
                 targets_cleared += new_target
                 total_targets_cleared += new_target
                 time.sleep(0.3)
@@ -306,11 +341,4 @@ if __name__ == '__main__':
 
             time.sleep(2)
     
-    # env.targets_util.remove_targets()
-    # # q_H = [1.8, 0, -1.6, 0.45]
-    # env.reset_human_arm(q_H)
-    # env.lock_human_joints(q_H)
-    # env.targets_util.update_targets()
-    # for _ in range(50):
-    #     env.bc.stepSimulation()
     print('done')

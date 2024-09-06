@@ -39,6 +39,8 @@ from wiping_task.wiping_planner import WipingDemo
 # utils
 from utils.collision_utils import get_collision_fn
 
+# video recording
+import cv2
 
 # urdf paths
 robot_urdf_location = 'pybullet_ur5/urdf/ur5_robotiq_85.urdf'
@@ -58,6 +60,43 @@ LINK_SKELETON = [
     'wrist_3_link',
     'ee_link',
 ]
+
+# Frame capture helper functions
+def capture_frame(bc, frame_dir, frame_count, width=640, height=480):
+    """Capture a frame from the PyBullet simulation."""
+    view_matrix = p.computeViewMatrixFromYawPitchRoll(cameraTargetPosition=[0, 0, 0],
+                                                      distance=2,
+                                                      yaw=0,
+                                                      pitch=-30,
+                                                      roll=0,
+                                                      upAxisIndex=2,
+                                                      physicsClientId=bc._client)
+    proj_matrix = p.computeProjectionMatrixFOV(fov=60, aspect=float(width) / height,
+                                               nearVal=0.1, farVal=100.0, physicsClientId=bc._client)
+
+    (_, _, px, _, _) = p.getCameraImage(width=width, height=height,
+                                        viewMatrix=view_matrix,
+                                        projectionMatrix=proj_matrix,
+                                        physicsClientId=bc._client)
+    img = np.reshape(px, (height, width, 4))  # RGBA
+    img = cv2.cvtColor(img, cv2.COLOR_RGBA2BGR)  # Convert to BGR for OpenCV
+    cv2.imwrite(f"{frame_dir}/frame_{frame_count:04d}.png", img)
+
+
+def save_video_from_frames(frame_dir, output_file, fps=20):
+    """Convert captured frames into a video."""
+    img_array = []
+    for filename in sorted(os.listdir(frame_dir)):
+        if filename.endswith(".png"):
+            img = cv2.imread(os.path.join(frame_dir, filename))
+            img_array.append(img)
+
+    height, width, _ = img_array[0].shape
+    out = cv2.VideoWriter(output_file, cv2.VideoWriter_fourcc(*'mp4v'), fps, (width, height))
+
+    for img in img_array:
+        out.write(img)
+    out.release()
 
 def wiping_loop(wiping_env, manip_env, q_H, total_targets_cleared, q_robot, q_robot_2_init):
     # initialize environments
@@ -101,7 +140,7 @@ def wiping_loop(wiping_env, manip_env, q_H, total_targets_cleared, q_robot, q_ro
                 manip_env.move_robot(manip_env.robot_2, q_R)
                 manip_env.move_robot(manip_env.robot, q_robot)
                 manip_env.bc.stepSimulation()
-            time.sleep(0.3)
+            # time.sleep(0.3)
             new_target, indices_to_delete = manip_env.targets_util.get_new_contact_points(targeted_arm=arm)
             manip_env.targets_util.remove_contacted_feasible_targets(indices_to_delete, arm)
             wiping_env.targets_util.remove_contacted_feasible_targets(indices_to_delete, arm)
@@ -162,11 +201,10 @@ def arm_manipulation_loop(manip_env, q_robot_2, q_robot_init, q_robot_goal, q_H_
 
     # #### DEBUGGINGGG
     # for q in traj:
-    #     for _ in range (50):
+    #     for _ in range (100):
     #         manip_env.move_robot(manip_env.robot_2, q_robot_2)
     #         manip_env.move_robot(manip_env.robot, q)
     #         manip_env.bc.stepSimulation()
-    #     manip_env.targets_util.update_targets()
     #     time.sleep(0.3)
 
     # Step 5: simulation loop
@@ -244,16 +282,6 @@ def move_robot_loop(manip_env, robot, other_robot, q_robot_init, q_robot_goal, q
     previous_update_time = time.time()
     update_second = 3  # sec
 
-    # ##### DEBUGGIGNG
-    # for q in traj:
-    #     for _ in range (50):
-    #         if manip_env.human_cid is None:
-    #             manip_env.reset_human_arm(q_H)
-    #         manip_env.move_robot(robot, q)
-    #         manip_env.move_robot(other_robot, q_other_robot)
-    #         manip_env.bc.stepSimulation()
-    #     time.sleep(0.3)
-
     # Step 3: simulation loop
     while True:
         # if near goal, execute rest of trajectory and terminate the simulation loop
@@ -298,46 +326,57 @@ def move_robot_loop(manip_env, robot, other_robot, q_robot_init, q_robot_goal, q
     print('move robot loop is done')
 
 if __name__ == '__main__':
+    # Initialize environments
     wiping_env = WipingDemo()
     manip_env = ManipulationDemo()
     wiping_env.reset()
     manip_env.reset()
 
-    # initial joint states
+    # Create directory for frames
+    frame_dir = "frames/"
+    if not os.path.exists(frame_dir):
+        os.makedirs(frame_dir)
+
+    # Video frame rate
+    fps = 20
+    frame_count = 0
+
+    # Initial joint states
     q_robot_init = manip_env.robot.arm_rest_poses
     q_robot_2_init = manip_env.robot_2.arm_rest_poses
     q_H_init = manip_env.human_rest_poses
 
-    # 1st wiping iter (with rest poses)
+    # First wiping iteration with rest poses
     start_time = time.time()
     success_rate = 0.0
     total_targets_cleared = 0
     total_targets = wiping_env.targets_util.total_target_count
 
     manip_env.reset_human_arm(q_H_init)
-    targets_cleared, total_targets_cleared = wiping_loop(wiping_env, manip_env, q_H_init, total_targets_cleared, 
+    targets_cleared, total_targets_cleared = wiping_loop(wiping_env, manip_env, q_H_init, total_targets_cleared,
                                                          q_robot_init, q_robot_2_init)
-    success_rate = total_targets_cleared/total_targets
+    success_rate = total_targets_cleared / total_targets
     print(f'total_targets_cleared: {total_targets_cleared}/{total_targets}')
 
-    # grasp generation
+    # Grasp generation
     q_H_init = manip_env.human_rest_poses
     q_R_grasp_samples, grasp_pose_samples, best_q_R_grasp, best_world_to_grasp = manip_env.generate_grasps(q_H_init)
     manip_env.compute_grasp_parameters(q_H_init, best_q_R_grasp, best_world_to_grasp)
 
-    # simulation loop until threshold is met...
+    # Simulation loop until threshold is met...
     current_joint_angles = q_robot_init
     target_joint_angles = best_q_R_grasp
     current_robot_2_joint_angles = manip_env.get_robot_joint_angles(manip_env.robot_2)
     current_human_joint_angles = q_H_init
-    for _ in range(50):
-        # find q_H_goal and q_R_goal using the grasp
+    for _ in range(2):
+        # Capture frame during the simulation
+        capture_frame(manip_env.bc, frame_dir, frame_count)
+        frame_count += 1
+
+        # Find q_H_goal and q_R_goal using the grasp
         valid_grasp, feasible_targets_found = False, False
         for _ in range(10000):
-            # reset robot and find non collision q_H
-            wiping_env.lock_robot_arm_joints(wiping_env.robot, wiping_env.robot.arm_rest_poses)
-            q_H_goal, world_to_right_elbow = wiping_env.get_valid_q_H()  
-            # check if feasible targets exist
+            q_H_goal, world_to_right_elbow = wiping_env.get_valid_q_H()
             feasible_targets_found_on_upperarm = wiping_env.reset_wiping_setup(q_H_goal, targeted_arm='upperarm')
             feasible_targets_found_on_forearm = wiping_env.reset_wiping_setup(q_H_goal, targeted_arm='forearm')
             feasible_targets_found = feasible_targets_found_on_upperarm or feasible_targets_found_on_forearm
@@ -349,37 +388,42 @@ if __name__ == '__main__':
         if not valid_grasp:
             raise ValueError('valid q_H not found for the grasp!')
 
-        # arm manipulation
+        # Arm manipulation
         if manip_env.human_cid is None:
-            # move to grasp pose for the first arm manipulation
+            # Move to grasp pose for the first arm manipulation
             manip_env.reset_human_arm(current_human_joint_angles)
-            move_robot_loop(manip_env, robot=manip_env.robot, other_robot=manip_env.robot_2, 
-                            q_robot_init=current_joint_angles, q_robot_goal=target_joint_angles, 
+            move_robot_loop(manip_env, robot=manip_env.robot, other_robot=manip_env.robot_2,
+                            q_robot_init=current_joint_angles, q_robot_goal=target_joint_angles,
                             q_other_robot=current_robot_2_joint_angles, q_H=current_human_joint_angles)
             current_joint_angles = manip_env.get_robot_joint_angles(manip_env.robot)
-        
-        arm_manipulation_loop(manip_env, q_robot_2=current_robot_2_joint_angles, 
+
+        arm_manipulation_loop(manip_env, q_robot_2=current_robot_2_joint_angles,
                               q_robot_init=current_joint_angles, q_robot_goal=q_R_goal, q_H_init=current_human_joint_angles,
                               world_to_eef_goal=world_to_eef_goal)
         current_joint_angles = manip_env.get_robot_joint_angles(manip_env.robot)
         current_human_joint_angles = manip_env.get_human_joint_angles()
 
-        # n-th wiping iter
-        targets_cleared, total_targets_cleared = wiping_loop(wiping_env, manip_env, current_human_joint_angles, total_targets_cleared, 
+        # N-th wiping iteration
+        targets_cleared, total_targets_cleared = wiping_loop(wiping_env, manip_env, current_human_joint_angles, total_targets_cleared,
                                                              q_robot=current_joint_angles, q_robot_2_init=current_robot_2_joint_angles)
 
-        # check if wiping threshold is reached
-        success_rate = total_targets_cleared/total_targets
+        # Check if wiping threshold is reached
+        success_rate = total_targets_cleared / total_targets
         print(f'success_rate: {success_rate}, total_targets_cleared: {total_targets_cleared}/{total_targets}')
         if success_rate >= 0.8:
             break
 
-        # save states
+        # Save states
         current_human_joint_angles = manip_env.get_human_joint_angles()
         current_joint_angles = manip_env.get_robot_joint_angles(manip_env.robot)
         current_robot_2_joint_angles = manip_env.get_robot_joint_angles(manip_env.robot_2)
-    
+
     total_time = time.time() - start_time
     print(f'success_rate: {success_rate}, total_targets_cleared: {total_targets_cleared}/{total_targets}')
     print(f'total simulation time: {total_time}')
     print('done')
+
+    # Save the video after simulation is complete
+    output_file = "simulation_video.mp4"
+    save_video_from_frames(frame_dir, output_file, fps=fps)
+    print(f"Video saved as {output_file} with {fps} FPS")

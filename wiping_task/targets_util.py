@@ -138,10 +138,6 @@ class TargetsUtil:
             self.targets_orn_forearm_world.append(target_orn)
             p.resetBasePositionAndOrientation(target, target_pos, target_orn, physicsClientId=self.pid)
 
-        # for target_pos, target_orn in zip(self.targets_pos_upperarm_world, self.targets_orn_upperarm_world):
-        #     self.util.draw_frame(target_pos, target_orn)
-        # print('h')
-
     def mark_feasible_targets(self):
         # change color for feasible targets
         for target in self.feasible_targets:
@@ -294,9 +290,11 @@ class TargetsUtil:
                 if 'upperarm' in order_key:
                     upperarm_orient = p.getLinkState(self.humanoid_id, self.right_shoulder, computeForwardKinematics=True, physicsClientId=self.pid)[5]
                     self.world_to_target_point = [compute_mean_target(targets_pos_world), upperarm_orient]
-                else:
+                elif 'forearm' in order_key:
                     forearm_orient = p.getLinkState(self.humanoid_id, self.right_elbow, computeForwardKinematics=True, physicsClientId=self.pid)[5]
                     self.world_to_target_point = [compute_mean_target(targets_pos_world), forearm_orient]
+                else:
+                    raise ValueError('invalid targeted arm! must be upperarm or forearm..')
                 
                 if 'front' in order_key and axis==1:
                     self.world_to_target_point = [self.world_to_target_point[0],
@@ -328,7 +326,7 @@ class TargetsUtil:
 
                 for i, joint_id in enumerate(self.robot_2.arm_controllable_joints):
                     p.resetJointState(self.robot_2.id, joint_id, q_robot_2[i], physicsClientId=self.pid)
-                p.stepSimulation(physicsClientId=self.pid)
+                # p.stepSimulation(physicsClientId=self.pid)
 
                 # check if config is valid
                 eef_pos = p.getLinkState(self.robot_2.id, self.robot_2.eef_id, computeForwardKinematics=True, physicsClientId=self.pid)[0]
@@ -355,7 +353,7 @@ class TargetsUtil:
 
                 for i, joint_id in enumerate(self.robot_2.arm_controllable_joints):
                     p.resetJointState(self.robot_2.id, joint_id, q_robot_2_closer[i], physicsClientId=self.pid)
-                p.stepSimulation(physicsClientId=self.pid)
+                # p.stepSimulation(physicsClientId=self.pid)
 
                 # check if config is valid
                 eef_pos = p.getLinkState(self.robot_2.id, self.robot_2.eef_id, computeForwardKinematics=True, physicsClientId=self.pid)[0]
@@ -382,8 +380,34 @@ class TargetsUtil:
 
         return feasible_targets_found
     
+    ###
+    def get_feasible_targets_lists(self):
+        return (self.feasible_targets_pos_world, self.feasible_targets_orn_world, 
+                self.feasible_targets_count, self.feasible_targets_indices, self.init_q_R, self.arm_side)
+
+    def set_feasible_targets_lists(self, feasible_targets_pos_world, feasible_targets_orn_world,
+                                   feasible_targets, feasible_targets_count, feasible_targets_indices,
+                                   init_q_R, arm_side):
+        self.feasible_targets_pos_world = feasible_targets_pos_world
+        self.feasible_targets_orn_world = feasible_targets_orn_world
+        self.feasible_targets = feasible_targets
+        self.feasible_targets_count = feasible_targets_count
+        self.feasible_targets_indices = feasible_targets_indices
+        self.init_q_R = init_q_R
+        self.arm_side = arm_side
+
+    def get_feasible_targets_given_indices(self, feasible_targets_indices, arm_side):
+        if 'upperarm' in arm_side:
+            return np.array(self.targets_upperarm)[feasible_targets_indices]
+        elif 'forearm' in arm_side:
+            return np.array(self.targets_forearm)[feasible_targets_indices]
+        else:
+            raise ValueError('invalid targeted arm! must be upperarm or forearm..')
+    ###
+
     def get_new_contact_points(self, targeted_arm):
         new_contact_points = 0
+        indices_to_delete = []
         for c in p.getContactPoints(bodyA=self.tool, bodyB=self.humanoid_id, physicsClientId=self.pid):
             linkA = c[3]
             linkB = c[4]
@@ -394,31 +418,25 @@ class TargetsUtil:
                     continue
 
                 # Check feasible targets
-                indices_to_delete = []
                 for i, (target_pos_world, target) in enumerate(zip(self.feasible_targets_pos_world, self.feasible_targets)):
                     if np.linalg.norm(contact_position - target_pos_world) < 0.025:
                         # The robot made contact with a point on the person's arm 
                         new_contact_points += 1
-                        p.resetBasePositionAndOrientation(target, [1000, 1000, 1000], [0, 0, 0, 1], physicsClientId=self.pid)
+                        # p.resetBasePositionAndOrientation(target, [1000, 1000, 1000], [0, 0, 0, 1], physicsClientId=self.pid)
                         indices_to_delete.append(i)
 
-                # Remove contacted target from the list
-                if len(indices_to_delete) == 0:
-                    continue
-                # print(f'indices_to_delete: {indices_to_delete}, self.feasible_targets_pos: {self.feasible_targets_pos[indices_to_delete[0]]}')
-
-                # self.feasible_targets_pos = [t for i, t in enumerate(self.feasible_targets_pos) if i not in indices_to_delete]
-                self.feasible_targets = [t for i, t in enumerate(self.feasible_targets) if i not in indices_to_delete]
-                self.feasible_targets_pos_world = [t for i, t in enumerate(self.feasible_targets_pos_world) if i not in indices_to_delete]
-
-                for i in indices_to_delete:
-                    if targeted_arm == 'upperarm':
-                        self.deleted_targets_indices_on_upperarm.append(self.feasible_targets_indices[i])
-                    elif targeted_arm == 'forearm':
-                        self.deleted_targets_indices_on_forearm.append(self.feasible_targets_indices[i])
-                    else:
-                        raise ValueError('invalid targeted arm! must be upperarm or forearm..')
-                
-                self.feasible_targets_indices = [t for i, t in enumerate(self.feasible_targets_indices) if i not in indices_to_delete]
-
-        return new_contact_points
+        return new_contact_points, indices_to_delete
+    
+    def remove_contacted_feasible_targets(self, indices_to_delete, targeted_arm):
+        for i in indices_to_delete:
+            p.resetBasePositionAndOrientation(self.feasible_targets[i], [1000, 1000, 1000], [0, 0, 0, 1], physicsClientId=self.pid)
+            if targeted_arm == 'upperarm':
+                self.deleted_targets_indices_on_upperarm.append(self.feasible_targets_indices[i])
+            elif targeted_arm == 'forearm':
+                self.deleted_targets_indices_on_forearm.append(self.feasible_targets_indices[i])
+            else:
+                raise ValueError('invalid targeted arm! must be upperarm or forearm..')
+            
+        self.feasible_targets = [t for i, t in enumerate(self.feasible_targets) if i not in indices_to_delete]
+        self.feasible_targets_pos_world = [t for i, t in enumerate(self.feasible_targets_pos_world) if i not in indices_to_delete]
+        self.feasible_targets_indices = [t for i, t in enumerate(self.feasible_targets_indices) if i not in indices_to_delete]

@@ -55,6 +55,7 @@ class TrajectoryFollower(nn.Module):
         control_points_number: int = 70,
         device: str = 'cuda',
         float_dtype: torch.dtype = torch.float32,
+        use_constraint_projection: bool = False,
     ):
         super(TrajectoryFollower, self).__init__()
         
@@ -108,6 +109,7 @@ class TrajectoryFollower(nn.Module):
 
         # Initialize constraint class as None
         self.constraint = None
+        self.use_constraint_projection = use_constraint_projection
 
         try:
             if self._control_points_json is not None:
@@ -141,6 +143,7 @@ class TrajectoryFollower(nn.Module):
                                                human_arm_lower_limits = human_arm_lower_limits,
                                                human_arm_upper_limits = human_arm_upper_limits,
                                                device=self._device, float_dtype=self._float_dtype)
+        self.use_constraint_projection = True
 
     def compute_ee_pose(self, state: torch.Tensor) -> torch.Tensor:
         
