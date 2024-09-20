@@ -156,7 +156,6 @@ class TargetsUtil:
         else:
             raise ValueError('invalid targeted arm! must be upperarm or forearm..')
 
-        # feasible_targets_pos = []
         feasible_targets_pos_world = []
         feasible_targets_orn_world = []
         feasible_targets = []
@@ -166,7 +165,6 @@ class TargetsUtil:
         for i in range(row_offset):
             for j in range(col_offset):
                 index = i + row_offset*j
-                # feasible_targets_pos.append(self.feasible_targets_pos[index])
                 feasible_targets_pos_world.append(self.feasible_targets_pos_world[index])
                 feasible_targets_orn_world.append(self.feasible_targets_orn_world[index])
                 feasible_targets.append(self.feasible_targets[index])
@@ -194,19 +192,28 @@ class TargetsUtil:
             
             return new_feasible_targets
         
-        # feasible_targets_pos = reverse_alternate_rows(feasible_targets_pos, col_offset)
         feasible_targets_pos_world = reverse_alternate_rows(feasible_targets_pos_world, col_offset)
         feasible_targets_orn_world = reverse_alternate_rows(feasible_targets_orn_world, col_offset)
         feasible_targets = reverse_alternate_rows(feasible_targets, col_offset)
         feasible_targets_indices = reverse_alternate_rows(feasible_targets_indices, col_offset)
 
-        # self.feasible_targets_pos = feasible_targets_pos
         self.feasible_targets_pos_world = feasible_targets_pos_world
         self.feasible_targets_orn_world = feasible_targets_orn_world
         self.feasible_targets = feasible_targets
         self.feasible_targets_indices = feasible_targets_indices
 
-    def get_feasible_targets_pos(self, targeted_arm):
+    def get_feasible_targets_pos(self, targeted_arm):  #### TODO if len() <= 6 feasibletargets=entire thing. also add skip to if len() is 0.
+        if targeted_arm == 'upperarm':
+            if len(self.targets_pos_upperarm_world) == 0:
+                feasible_targets_found = False
+                return feasible_targets_found
+        elif targeted_arm == 'forearm':
+            if len(self.targets_pos_forearm_world) == 0:
+                feasible_targets_found = False
+                return feasible_targets_found
+        else:
+            raise ValueError('invalid targeted arm! must be upperarm or forearm..')
+        
         # randomize order of trial
         self.target_order_flags = {'upperarm_front': False,
                                    'upperarm_back': False,
@@ -242,13 +249,17 @@ class TargetsUtil:
 
         # check both x and y axis
         for axis in self.target_axis_trial_order:
-            front_targets_on_upperarm_indices, back_targets_on_upperarm_indices = split_half(self.targets_pos_on_upperarm, axis)
-            front_targets_on_forearm_indices, back_targets_on_forearm_indices = split_half(self.targets_pos_on_forearm, axis)
-            
-            # self.target_pos_dict = {'upperarm_front': np.array(self.targets_pos_on_upperarm)[front_targets_on_upperarm_indices],
-            #                         'upperarm_back': np.array(self.targets_pos_on_upperarm)[back_targets_on_upperarm_indices],
-            #                         'forearm_front': np.array(self.targets_pos_on_forearm)[front_targets_on_forearm_indices],
-            #                         'forearm_back': np.array(self.targets_pos_on_forearm)[back_targets_on_forearm_indices]}
+            if len(self.targets_pos_on_upperarm) <= 6:
+                front_targets_on_upperarm_indices = [i for i, pos in enumerate(self.targets_pos_on_upperarm)]
+                back_targets_on_upperarm_indices = front_targets_on_upperarm_indices
+            else:
+                front_targets_on_upperarm_indices, back_targets_on_upperarm_indices = split_half(self.targets_pos_on_upperarm, axis)
+            if len(self.targets_pos_on_forearm) <= 6:
+                front_targets_on_forearm_indices = [i for i, pos in enumerate(self.targets_pos_on_forearm)]
+                back_targets_on_forearm_indices = front_targets_on_forearm_indices
+            else:
+                front_targets_on_forearm_indices, back_targets_on_forearm_indices = split_half(self.targets_pos_on_forearm, axis)
+
             self.target_pos_world_dict = {'upperarm_front': np.array(self.targets_pos_upperarm_world)[front_targets_on_upperarm_indices],
                                           'upperarm_back': np.array(self.targets_pos_upperarm_world)[back_targets_on_upperarm_indices],
                                           'forearm_front': np.array(self.targets_pos_forearm_world)[front_targets_on_forearm_indices],
@@ -267,112 +278,63 @@ class TargetsUtil:
                                         'forearm_back': back_targets_on_forearm_indices}
             
             for order_key in self.target_trial_order:
-                # if order_key=='upperarm_back' and axis==0:
-                #     continue    
-
                 # reset robot
                 self.robot_2.reset()
 
                 # set flag & targets
                 self.target_order_flags[order_key] = True
-                # targets_pos = self.target_pos_dict[order_key]
                 targets_pos_world = self.target_pos_world_dict[order_key]
                 targets_orn_world = self.target_orn_world_dict[order_key]
                 targets = self.target_dict[order_key]
                 targets_indices = self.target_indices_dict[order_key]
 
+                if len(targets_pos_world) == 0:
+                    continue
+
                 # compute world_to_target_point
-                def compute_mean_target(targets_pos):
-                    targets_pos = np.array(targets_pos)
-                    mean_targets_pos = np.mean(targets_pos, axis=0)
-                    return tuple(mean_targets_pos)
+                world_to_target_points = [[targets_pos_world[0], targets_orn_world[0]],
+                                          [targets_pos_world[len(targets_pos_world)//2], targets_orn_world[len(targets_orn_world)//2]],
+                                          [targets_pos_world[-1], targets_orn_world[-1]]]
 
-                if 'upperarm' in order_key:
-                    upperarm_orient = p.getLinkState(self.humanoid_id, self.right_shoulder, computeForwardKinematics=True, physicsClientId=self.pid)[5]
-                    self.world_to_target_point = [compute_mean_target(targets_pos_world), upperarm_orient]
-                elif 'forearm' in order_key:
-                    forearm_orient = p.getLinkState(self.humanoid_id, self.right_elbow, computeForwardKinematics=True, physicsClientId=self.pid)[5]
-                    self.world_to_target_point = [compute_mean_target(targets_pos_world), forearm_orient]
-                else:
-                    raise ValueError('invalid targeted arm! must be upperarm or forearm..')
-                
-                if 'front' in order_key and axis==1:
-                    self.world_to_target_point = [self.world_to_target_point[0],
-                                                  self.util.rotate_quaternion_by_axis(self.world_to_target_point[1], axis='y', degrees=90)]
-                elif 'back' in order_key and axis==0:
-                    self.world_to_target_point = [self.world_to_target_point[0],
-                                                  self.util.rotate_quaternion_by_axis(self.world_to_target_point[1], axis='y', degrees=180)]
-                elif 'back' in order_key and axis==1:
-                    self.world_to_target_point = [self.world_to_target_point[0],
-                                                  self.util.rotate_quaternion_by_axis(self.world_to_target_point[1], axis='y', degrees=270)]
+                for world_to_target_point in world_to_target_points:
+                    # compute desired world_to_eef (check if it can get closer to the target point)
+                    world_to_eef = p.multiplyTransforms(world_to_target_point[0], world_to_target_point[1],
+                                                        self.target_closer_to_eef[0], self.target_closer_to_eef[1], physicsClientId=self.pid)
 
-                # compute desired world_to_eef (initial robot config)
-                world_to_eef = p.multiplyTransforms(self.world_to_target_point[0], self.world_to_target_point[1],
-                                                    self.target_to_eef[0], self.target_to_eef[1], physicsClientId=self.pid)
-                
-                # self.util.draw_frame(self.world_to_target_point[0], self.world_to_target_point[1])
-                # self.util.draw_frame(world_to_eef[0], world_to_eef[1])
-                
-                # set robot initial joint state
-                q_robot_2 = p.calculateInverseKinematics(self.robot_2.id, self.robot_2.eef_id, world_to_eef[0], world_to_eef[1],
-                                                               lowerLimits=self.robot_2.arm_lower_limits, upperLimits=self.robot_2.arm_upper_limits, 
-                                                               jointRanges=self.robot_2.arm_joint_ranges, restPoses=self.robot_2.arm_rest_poses,
-                                                               maxNumIterations=40, physicsClientId=self.pid)
-                q_robot_2 = [q_robot_2[i] for i in range(len(self.robot_2.arm_controllable_joints))]
-                if min(q_robot_2) < min(self.robot_2.arm_lower_limits) or max(q_robot_2) > max(self.robot_2.arm_upper_limits):  # invalid joint state
-                    # reset flag
-                    self.target_order_flags[order_key] = False
-                    continue
+                    # set robot initial joint state
+                    q_robot_2_closer = p.calculateInverseKinematics(self.robot_2.id, self.robot_2.eef_id, world_to_eef[0], world_to_eef[1],
+                                                                lowerLimits=self.robot_2.arm_lower_limits, upperLimits=self.robot_2.arm_upper_limits, 
+                                                                jointRanges=self.robot_2.arm_joint_ranges, restPoses=self.robot_2.arm_rest_poses,
+                                                                maxNumIterations=40, physicsClientId=self.pid)
+                    q_robot_2_closer = [q_robot_2_closer[i] for i in range(len(self.robot_2.arm_controllable_joints))]
+                    if min(q_robot_2_closer) < min(self.robot_2.arm_lower_limits) or max(q_robot_2_closer) > max(self.robot_2.arm_upper_limits):  # invalid joint state
+                        # reset flag
+                        self.target_order_flags[order_key] = False
+                        continue
 
-                for i, joint_id in enumerate(self.robot_2.arm_controllable_joints):
-                    p.resetJointState(self.robot_2.id, joint_id, q_robot_2[i], physicsClientId=self.pid)
-                # p.stepSimulation(physicsClientId=self.pid)
+                    for i, joint_id in enumerate(self.robot_2.arm_controllable_joints):
+                        p.resetJointState(self.robot_2.id, joint_id, q_robot_2_closer[i], physicsClientId=self.pid)
 
-                # check if config is valid
-                eef_pos = p.getLinkState(self.robot_2.id, self.robot_2.eef_id, computeForwardKinematics=True, physicsClientId=self.pid)[0]
-                dist = np.linalg.norm(np.array(world_to_eef[0]) - np.array(eef_pos))
-                if dist > 0.03 or self.robot_2_in_collision(q_robot_2):
-                    # reset flag
-                    self.target_order_flags[order_key] = False
-                    continue
+                    # check if config is valid
+                    eef_pos = p.getLinkState(self.robot_2.id, self.robot_2.eef_id, computeForwardKinematics=True, physicsClientId=self.pid)[0]
+                    dist = np.linalg.norm(np.array(world_to_eef[0]) - np.array(eef_pos))
+                    if dist > 0.03 or self.robot_2_in_collision(q_robot_2_closer):
+                        # reset flag
+                        self.target_order_flags[order_key] = False
+                        continue
 
-                # compute desired world_to_eef (check if it can get closer to the target point)
-                world_to_eef = p.multiplyTransforms(self.world_to_target_point[0], self.world_to_target_point[1],
-                                                    self.target_closer_to_eef[0], self.target_closer_to_eef[1], physicsClientId=self.pid)
+                    # valid, save this state
+                    break
 
-                # set robot initial joint state
-                q_robot_2_closer = p.calculateInverseKinematics(self.robot_2.id, self.robot_2.eef_id, world_to_eef[0], world_to_eef[1],
-                                                               lowerLimits=self.robot_2.arm_lower_limits, upperLimits=self.robot_2.arm_upper_limits, 
-                                                               jointRanges=self.robot_2.arm_joint_ranges, restPoses=self.robot_2.arm_rest_poses,
-                                                               maxNumIterations=40, physicsClientId=self.pid)
-                q_robot_2_closer = [q_robot_2_closer[i] for i in range(len(self.robot_2.arm_controllable_joints))]
-                if min(q_robot_2_closer) < min(self.robot_2.arm_lower_limits) or max(q_robot_2_closer) > max(self.robot_2.arm_upper_limits):  # invalid joint state
-                    # reset flag
-                    self.target_order_flags[order_key] = False
-                    continue
-
-                for i, joint_id in enumerate(self.robot_2.arm_controllable_joints):
-                    p.resetJointState(self.robot_2.id, joint_id, q_robot_2_closer[i], physicsClientId=self.pid)
-                # p.stepSimulation(physicsClientId=self.pid)
-
-                # check if config is valid
-                eef_pos = p.getLinkState(self.robot_2.id, self.robot_2.eef_id, computeForwardKinematics=True, physicsClientId=self.pid)[0]
-                dist = np.linalg.norm(np.array(world_to_eef[0]) - np.array(eef_pos))
-                if dist > 0.03 or self.robot_2_in_collision(q_robot_2_closer):
-                    # reset flag
-                    self.target_order_flags[order_key] = False
-                    continue
-
-                # self.feasible_targets_pos = targets_pos
                 self.feasible_targets_pos_world = targets_pos_world
                 self.feasible_targets_orn_world = targets_orn_world
                 self.feasible_targets = targets
                 self.feasible_targets_count = len(targets)
                 self.feasible_targets_indices = targets_indices
-                self.init_q_R = q_robot_2
+                self.init_q_R = q_robot_2_closer
                 self.arm_side = order_key
                 feasible_targets_found = True
-                print(f'arm_side: {self.arm_side}, axis: {axis}')
+                # print(f'arm_side: {self.arm_side}, axis: {axis}')
                 break
 
             if feasible_targets_found:
@@ -408,22 +370,31 @@ class TargetsUtil:
     def get_new_contact_points(self, targeted_arm):
         new_contact_points = 0
         indices_to_delete = []
-        for c in p.getContactPoints(bodyA=self.tool, bodyB=self.humanoid_id, physicsClientId=self.pid):
-            linkA = c[3]
-            linkB = c[4]
-            contact_position = np.array(c[6])  # contact position on B
-            if linkA in [1]:  # tool endtip
-                # Only consider contact with human upperarm, forearm, hand
-                if linkB < 0 or linkB not in self.human_right_arm:
-                    continue
+        # # for c in p.getContactPoints(bodyA=self.tool, bodyB=self.humanoid_id, physicsClientId=self.pid):
+        # for c in p.getClosestPoints(bodyA=self.tool, bodyB=self.humanoid_id, distance=100, physicsClientId=self.pid):
+        #     linkA = c[3]
+        #     linkB = c[4]
+        #     contact_position = np.array(c[6])  # contact position on B
+        #     if linkA in [1]:  # tool endtip
+        #         # Only consider contact with human upperarm, forearm, hand
+        #         if linkB < 0 or linkB not in self.human_right_arm:
+        #             continue
 
-                # Check feasible targets
-                for i, (target_pos_world, target) in enumerate(zip(self.feasible_targets_pos_world, self.feasible_targets)):
-                    if np.linalg.norm(contact_position - target_pos_world) < 0.025:
-                        # The robot made contact with a point on the person's arm 
-                        new_contact_points += 1
-                        # p.resetBasePositionAndOrientation(target, [1000, 1000, 1000], [0, 0, 0, 1], physicsClientId=self.pid)
-                        indices_to_delete.append(i)
+        #         # Check feasible targets
+        #         for i, (target_pos_world, target) in enumerate(zip(self.feasible_targets_pos_world, self.feasible_targets)):
+        #             if np.linalg.norm(contact_position - target_pos_world) < 0.028:
+        #                 # The robot made contact with a point on the person's arm 
+        #                 new_contact_points += 1
+        #                 # p.resetBasePositionAndOrientation(target, [1000, 1000, 1000], [0, 0, 0, 1], physicsClientId=self.pid)
+        #                 indices_to_delete.append(i)
+
+        tool_endtip_pos = p.getLinkState(self.tool, 1, physicsClientId=self.pid)[0]
+        # Check feasible targets
+        for i, (target_pos_world, target) in enumerate(zip(self.feasible_targets_pos_world, self.feasible_targets)):
+            if np.linalg.norm(tool_endtip_pos - target_pos_world) < 0.03:
+                # The robot made contact with a point on the person's arm 
+                new_contact_points += 1
+                indices_to_delete.append(i)
 
         return new_contact_points, indices_to_delete
     

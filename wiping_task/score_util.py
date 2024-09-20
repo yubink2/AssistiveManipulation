@@ -7,19 +7,28 @@ class ScoreUtil:
         self.util = util
 
     def init_score_util(self, humanoid_id, right_shoulder, right_elbow, human_controllable_joints,
-                        robot_2, tool,
-                        target_to_eef, target_closer_to_eef, robot_2_in_collision):
+                        robot, robot_2, tool,
+                        target_to_eef, target_closer_to_eef, robot_2_in_collision, robot_in_collision):
         self.humanoid_id = humanoid_id
         self.right_shoulder = right_shoulder
         self.right_elbow = right_elbow
         self.human_controllable_joints = human_controllable_joints
 
+        self.robot = robot
         self.robot_2 = robot_2
         self.tool = tool
 
         self.target_to_eef = target_to_eef
         self.target_closer_to_eef = target_closer_to_eef
         self.robot_2_in_collision = robot_2_in_collision
+        self.robot_in_collision = robot_in_collision
+
+        self.feasibility_weight = 0.7
+        self.closeness_weight = 0.3
+        
+        min_q_H = [-3.14, -0.24, -2.66, 0.4]
+        max_q_H = [3.14, 1.23, -1.32, 2.54]
+        self.max_dist = np.linalg.norm(np.array(min_q_H) - np.array(max_q_H))
 
     def reset(self, targets_pos_upperarm_world, targets_orn_upperarm_world, targets_pos_forearm_world, targets_orn_forearm_world, 
               q_H, q_robot):
@@ -32,12 +41,12 @@ class ScoreUtil:
         self.q_H = q_H
         self.q_robot = q_robot
 
-    def compute_score(self):
+    def compute_score_by_feasibility(self):
         # reset robot & human joint states
         for i, joint_id in enumerate(self.robot.arm_controllable_joints):
             p.resetJointState(self.robot.id, joint_id, self.q_robot[i], physicsClientId=self.pid)
         for i, j in enumerate(self.human_controllable_joints):
-            self.bc.resetJointState(self.humanoid_id, j, self.q_H[i], physicsClientId=self.pid)
+            p.resetJointState(self.humanoid_id, j, self.q_H[i], physicsClientId=self.pid)
 
         # check upperarm targets
         reachable_targets_count = 0
@@ -90,3 +99,8 @@ class ScoreUtil:
 
         score = reachable_targets_count/self.total_targets
         return score
+        # return reachable_targets_count
+    
+    def compute_score_by_closeness(self, q_H_init, q_H_goal):
+        dist = np.linalg.norm(np.array(q_H_init) - np.array(q_H_goal))
+        return (self.max_dist-dist)/self.max_dist

@@ -116,7 +116,7 @@ class MPPI():
         goal,
         init_traj,
         num_samples=100,
-        temperature=5.,
+        temperature=1.,
         terminal_state_cost=None,
         u_min=None,
         u_max=None,
@@ -331,9 +331,9 @@ class MPPI():
         # Add the goal at the end 
         state_rollout = torch.vstack((state_rollout, self.goal))
 
-        # Upsample and downsample the trajectory
-        interpolated_state_rollout = torch.nn.functional.interpolate(state_rollout.unsqueeze(0).transpose(1,2), size=500, mode='linear', align_corners=True).transpose(1,2).squeeze(0)
-        state_rollout = self._downsample_trajectory(interpolated_state_rollout, 1.0/self.waypoint_density)
+        # # Upsample and downsample the trajectory
+        # interpolated_state_rollout = torch.nn.functional.interpolate(state_rollout.unsqueeze(0).transpose(1,2), size=500, mode='linear', align_corners=True).transpose(1,2).squeeze(0)
+        # state_rollout = self._downsample_trajectory(interpolated_state_rollout, 1.0/self.waypoint_density)
 
         self.num_steps += 1
 
@@ -393,7 +393,7 @@ class MPPI():
             action_cost = self.temperature * torch.abs(self.noise) @ self.noise_sigma_inv
             # NOTE: The original paper does self.temperature * torch.abs(self.noise) @ self.noise_sigma_inv, but this biases
             # the actions with low noise if all states have the same cost. With abs(noise) we prefer actions close to the
-            # nomial trajectory.
+            # nominal trajectory.
         else:
             action_cost = self.temperature * self.noise @ self.noise_sigma_inv  # Like original paper
 

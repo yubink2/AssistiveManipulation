@@ -29,8 +29,8 @@ from trajectory_following.trajectory_following import TrajectoryFollower
 import torch
 
 class MPPI_H_Clamp():
-    def __init__(self, eef_to_cp, right_elbow_to_cp,
-                 robot_base_pose, human_arm_lower_limits, human_arm_upper_limits, human_rest_poses):
+    def __init__(self, eef_to_cp, right_elbow_joint_to_cp,
+                 robot_base_pose, human_arm_lower_limits, human_arm_upper_limits, human_rest_poses, robot_rest_poses):
         # 2nd BC server
         self.bc_second = BulletClient(connection_mode=p.DIRECT)
         self.bc_second.setAdditionalSearchPath(pybullet_data.getDataPath())
@@ -58,12 +58,17 @@ class MPPI_H_Clamp():
         self.cp_to_eef = self.bc_second.invertTransform(self.eef_to_cp[0], self.eef_to_cp[1])
 
         # initialize T_right_elbow_to_cp (constant)
-        self.right_elbow_to_cp = right_elbow_to_cp
+        self.right_elbow_joint_to_cp = right_elbow_joint_to_cp
+        self.cp_to_right_elbow_joint = self.bc_second.invertTransform(self.right_elbow_joint_to_cp[0], self.right_elbow_joint_to_cp[1])
 
         # human arm joint parameters
         self.human_arm_lower_limits = human_arm_lower_limits
         self.human_arm_upper_limits = human_arm_upper_limits
+        self.human_arm_joint_ranges = list(np.array(human_arm_upper_limits) - np.array(human_arm_lower_limits))
         self.human_rest_poses = human_rest_poses
+
+        # robot arm joint parameters (for IK)
+        self.robot_rest_poses = robot_rest_poses
 
     def clamp_human_joints(self, q_R_list, device):
         for idx, q_R in enumerate(q_R_list):
@@ -76,20 +81,17 @@ class MPPI_H_Clamp():
             # get cp pose
             world_to_cp = self.bc_second.multiplyTransforms(world_to_eef[0], world_to_eef[1],
                                                             self.eef_to_cp[0], self.eef_to_cp[1])
-
-            # human parameters for null space IK
-            ll = self.human_arm_lower_limits
-            ul = self.human_arm_upper_limits
-            jr = list(np.array(ul) - np.array(ll))
-            rp = self.human_rest_poses
+            world_to_right_elbow_joint = self.bc_second.multiplyTransforms(world_to_cp[0], world_to_cp[1],
+                                                            self.cp_to_right_elbow_joint[0], self.cp_to_right_elbow_joint[1])
 
             # IK -> get human joint angles
             q_H = self.bc_second.calculateInverseKinematics(self.humanoid._humanoid, self.right_elbow, 
-                                                            targetPosition=world_to_cp[0], targetOrientation=world_to_cp[1],
-                                                            lowerLimits=ll, upperLimits=ul,
-                                                            jointRanges=jr, restPoses=rp,
-                                                            maxNumIterations=100, residualThreshold=1e-6
+                                                            targetPosition=world_to_right_elbow_joint[0], targetOrientation=world_to_right_elbow_joint[1],
+                                                            lowerLimits=self.human_arm_lower_limits, upperLimits=self.human_arm_upper_limits,
+                                                            jointRanges=self.human_arm_joint_ranges, restPoses=self.human_rest_poses,
+                                                            maxNumIterations=50
                                                             )
+            q_H = np.clip(q_H, self.human_arm_lower_limits, self.human_arm_upper_limits)
 
             # move humanoid in the 2nd server, get new cp pose
             self.bc_second.resetJointState(self.humanoid._humanoid, self.right_shoulder_y, q_H[0])
@@ -97,9 +99,9 @@ class MPPI_H_Clamp():
             self.bc_second.resetJointState(self.humanoid._humanoid, self.right_shoulder_r, q_H[2])
             self.bc_second.resetJointState(self.humanoid._humanoid, self.right_elbow, q_H[3])
             self.bc_second.stepSimulation()
-            world_to_right_elbow = self.bc_second.getLinkState(self.humanoid._humanoid, self.right_elbow)[:2]
-            world_to_cp = self.bc_second.multiplyTransforms(world_to_right_elbow[0], world_to_right_elbow[1],
-                                                            self.right_elbow_to_cp[0], self.right_elbow_to_cp[1])
+            world_to_right_elbow_joint_actual = self.bc_second.getLinkState(self.humanoid._humanoid, self.right_elbow)[4:6]
+            world_to_cp = self.bc_second.multiplyTransforms(world_to_right_elbow_joint_actual[0], world_to_right_elbow_joint_actual[1],
+                                                            self.right_elbow_joint_to_cp[0], self.right_elbow_joint_to_cp[1])
 
             # get new eef pose
             world_to_eef = self.bc_second.multiplyTransforms(world_to_cp[0], world_to_cp[1],
@@ -107,9 +109,12 @@ class MPPI_H_Clamp():
 
             # IK -> get new robot joint angles
             q_R = self.bc_second.calculateInverseKinematics(self.robot.id, self.robot.eef_id, world_to_eef[0], world_to_eef[1],
-                                                        self.robot.arm_lower_limits, self.robot.arm_upper_limits, self.robot.arm_joint_ranges, self.robot.arm_rest_poses,
-                                                        maxNumIterations=20)
+                                                            lowerLimits=self.robot.arm_lower_limits, upperLimits=self.robot.arm_upper_limits, 
+                                                            jointRanges=self.robot.arm_joint_ranges, restPoses=self.robot_rest_poses,
+                                                            maxNumIterations=50
+                                                            )
             q_R = [q_R[i] for i in range(len(self.robot.arm_controllable_joints))]
+
             q_R_list[idx] = torch.from_numpy(np.array(q_R)).double().to(device)
         
         return q_R_list

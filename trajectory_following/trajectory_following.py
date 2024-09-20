@@ -36,6 +36,7 @@ import pytorch_kinematics as pk
 
 # Import constraint projection
 from trajectory_following.trajectory_following_projection import ConstraintProjection
+from trajectory_following.trajectory_following_clamping import TrajectoryFollower_H_Clamp
 
 
 log = logging.getLogger('TRAJECTORY FOLLOWING')
@@ -109,6 +110,7 @@ class TrajectoryFollower(nn.Module):
 
         # Initialize constraint class as None
         self.constraint = None
+        self.H_clamp = None
         self.use_constraint_projection = use_constraint_projection
 
         try:
@@ -143,7 +145,19 @@ class TrajectoryFollower(nn.Module):
                                                human_arm_lower_limits = human_arm_lower_limits,
                                                human_arm_upper_limits = human_arm_upper_limits,
                                                device=self._device, float_dtype=self._float_dtype)
+
         self.use_constraint_projection = True
+
+    def _init_H_clamping(self, eef_to_cp, right_elbow_joint_to_cp,
+                        robot_base_pose, human_arm_lower_limits, human_arm_upper_limits, 
+                        human_rest_poses, robot_rest_poses):
+        self.H_clamp = TrajectoryFollower_H_Clamp(eef_to_cp = eef_to_cp, 
+                                                  right_elbow_joint_to_cp = right_elbow_joint_to_cp,
+                                                  robot_base_pose = robot_base_pose, 
+                                                  human_arm_lower_limits = human_arm_lower_limits, 
+                                                  human_arm_upper_limits = human_arm_upper_limits, 
+                                                  human_rest_poses = human_rest_poses, 
+                                                  robot_rest_poses = robot_rest_poses)
 
     def compute_ee_pose(self, state: torch.Tensor) -> torch.Tensor:
         
@@ -314,7 +328,7 @@ class TrajectoryFollower(nn.Module):
         distance_diff = self._trajectory_skeleton_control_points - skeleton_control_points
         distance_diff_norm = torch.linalg.norm(distance_diff, dim=2)
         if self._consider_obstacle_collisions:
-            valid_waypoints = torch.all(distance_diff_norm <= sdf_value, dim=1)
+            valid_waypoints = torch.all(distance_diff_norm <= sdf_value+0.05, dim=1)
         else:
             valid_waypoints = torch.all(distance_diff_norm <= 0.1, dim=1)
 
@@ -500,14 +514,13 @@ class TrajectoryFollower(nn.Module):
 
         return potential
 
-
-    def follow_trajectory(self, current_joint_angles, current_human_joint_angles):
-
+    def follow_trajectory(self, current_joint_angles, current_human_joint_angles, time_step=0.5):
         """
         Main method for trajectory following.
 
         :param current_joint_angles: Current robot configuration
-        :returns: Computed joint velocity commands
+        :param current_human_joint_angles: Current human configuration
+        :returns: Computed target joint angles for POSITION_CONTROL in pybullet
         """
 
         # Define maximum joint speed and control gain
@@ -526,54 +539,48 @@ class TrajectoryFollower(nn.Module):
         potential_field.backward()
         potential_field_grad = current_joint_angles_tensor.grad
         
-        # Find current velocity command
-        current_velocity_command = -CONTROL_GAIN * potential_field_grad
-        if torch.linalg.norm(current_velocity_command) > MAX_SPEED:
-            current_velocity_command = MAX_SPEED * current_velocity_command / torch.linalg.norm(current_velocity_command)
-            current_velocity_command = current_velocity_command.to(dtype=self._float_dtype)
+        # Compute the change in joint positions (similar to velocity command, but we integrate it into position)
+        delta_joint_angles = -CONTROL_GAIN * potential_field_grad * time_step
+        if torch.linalg.norm(delta_joint_angles) > MAX_SPEED:
+            delta_joint_angles = MAX_SPEED * delta_joint_angles / torch.linalg.norm(delta_joint_angles)
+            delta_joint_angles = delta_joint_angles.to(dtype=self._float_dtype)
 
-        ####
-        if self.constraint is not None:
-            # Calculate: velocity command -> desired q_R -> desired eef pose
-            desired_joint_angles = torch.tensor(current_joint_angles, device=self._device) + current_velocity_command * 0.05  # time step
-            desired_joint_angles = desired_joint_angles.squeeze()
-            desired_eef = self.compute_ee_pose(desired_joint_angles)
-            
-            # Compute the Jacobian of the constraint at the current joint angles
-            J_g = self.constraint.compute_constraint_jacobian_on_robot(current_joint_angles, desired_eef, current_human_joint_angles)
-            J_g = torch.tensor(J_g).to(device=self._device, dtype=self._float_dtype)
+        # # Check for constraint if needed
+        # if self.constraint is not None:
+        #     # Calculate: delta_joint_angles -> desired q_R -> desired eef pose
+        #     desired_joint_angles = torch.tensor(current_joint_angles, device=self._device) + delta_joint_angles  # Position update
+        #     desired_joint_angles = desired_joint_angles.squeeze()
+        #     desired_eef = self.compute_ee_pose(desired_joint_angles)
+        #     desired_cp = (desired_eef @ self.T_eef_to_cp).squeeze(0)
 
-            # Project the velocity command onto the null space of the constraint
-            J_g = J_g.reshape(1, -1)
-            pseudo_inverse = torch.linalg.pinv(J_g @ J_g.T).to(device=self._device, dtype=self._float_dtype)
-            I = torch.eye(J_g.shape[1]).to(device=self._device, dtype=self._float_dtype)
-            projection_matrix = I - J_g.T @ pseudo_inverse @ J_g
-            current_velocity_command_projected = (torch.mm(projection_matrix, (current_velocity_command).T)).T
+        #     # Compute the jacobian of the constraint g_R
+        #     J_gR = self.constraint.compute_constraint_jacobian_on_robot(current_joint_angles, desired_eef, current_human_joint_angles)
+        #     J_gR = torch.tensor(J_gR).to(device=self._device, dtype=self._float_dtype)
 
-            # # Add the correction term
-            # alpha = 0.01
-            # constraint_value = self.constraint.constraint_function_on_robot(current_joint_angles, desired_eef, current_human_joint_angles)
-            # correction = -alpha * torch.matmul(J_g.T, torch.tensor(constraint_value).to(device=self._device, dtype=self._float_dtype).unsqueeze(0))
-            # current_velocity_command_corrected = current_velocity_command_projected + correction
+        #     # Projection matrix of J_gR
+        #     J_gR = J_gR.reshape(1, -1)
+        #     pseudo_inverse_gR = torch.linalg.pinv(J_gR @ J_gR.T).to(device=self._device, dtype=self._float_dtype)
+        #     I = torch.eye(J_gR.shape[1]).to(device=self._device, dtype=self._float_dtype)
+        #     projection_matrix_gR = I - J_gR.T @ pseudo_inverse_gR @ J_gR
 
-            current_velocity_command_corrected = current_velocity_command_projected.cpu().numpy()
+        #     # Project the joint angles delta onto the null space of the constraint
+        #     delta_joint_angles_projected = (torch.mm(projection_matrix_gR, delta_joint_angles.T)).T
+        #     delta_joint_angles_projected = delta_joint_angles_projected.cpu().numpy()
 
-            # Define velocity command
-            velocity_command = current_velocity_command_corrected
+        #     # Compute the target joint angles (current + corrected delta)
+        #     target_joint_angles = (current_joint_angles + delta_joint_angles_projected).squeeze()
+
+        if self.H_clamp is not None:
+            delta_joint_angles = delta_joint_angles.cpu().numpy()
+            target_joint_angles = (current_joint_angles + delta_joint_angles).squeeze()
+            target_joint_angles = self.H_clamp.clamp_human_joints(target_joint_angles)
 
         else:
-            current_velocity_command = current_velocity_command.cpu().numpy()
+            # If no constraint, compute the target joint angles directly
+            delta_joint_angles = delta_joint_angles.cpu().numpy()
+            target_joint_angles = (current_joint_angles + delta_joint_angles).squeeze()
 
-            # Define velocity command
-            velocity_command = current_velocity_command
-
-        # # # #####
-        # current_velocity_command = current_velocity_command.cpu().numpy()
-
-        # # Define velocity command
-        # velocity_command = current_velocity_command
-
-        return velocity_command
+        return target_joint_angles
 
 
 def planner_test():
