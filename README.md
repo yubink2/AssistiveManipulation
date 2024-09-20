@@ -1,6 +1,6 @@
 ## How to set up the environment
 
-* clone the repository:
+* clone the repository
 ```
 git clone https://github.com/yubink2/AssistiveManipulation.git
 ```
@@ -19,11 +19,17 @@ conda activate assistive-manip
 
 ## How to visualize the human motion from the dataset and collect the human joint limits
 
-* python collect_human_arm_limits.py
+* 
+```
+python collect_human_arm_limits.py
+```
 
 ## How to run the wiping and manipulation pipeline
 
-* python wiping_manipulation_demo.py
+* 
+```
+python wiping_manipulation_demo.py
+```
 
 ## Notes
 
