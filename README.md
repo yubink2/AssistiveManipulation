@@ -19,14 +19,12 @@ conda activate assistive-manip
 
 ## How to visualize the human motion from the dataset and collect the human joint limits
 
-* 
 ```
 python collect_human_arm_limits.py
 ```
 
 ## How to run the wiping and manipulation pipeline
 
-* 
 ```
 python wiping_manipulation_demo.py
 ```
