@@ -6,7 +6,7 @@ WORKDIR /app
 
 # Install dependencies and Miniconda
 ARG DEBIAN_FRONTEND=noninteractive
-RUN apt-get update && apt-get install -y wget bzip2 \
+RUN apt-get update && apt-get install -y wget bzip2 git \
     && wget --quiet https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh \
     && bash Miniconda3-latest-Linux-x86_64.sh -b -p /opt/conda \
     && rm Miniconda3-latest-Linux-x86_64.sh
