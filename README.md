@@ -5,10 +5,6 @@
 git clone https://github.com/yubink2/AssistiveManipulation.git
 ```
 
-* download the h36m dataset from here: https://drive.google.com/file/d/1lGbtOsasw5F2MjvwWd9AtzCXdIefvmpv/view?usp=sharing
-
-* unzip the dataset and place it following directory structure: AssistiveManipulation/deep_mimic/mocap/data
-
 * build the docker image
 ```
 docker build -t assistive-manip-env .
@@ -23,6 +19,10 @@ docker run -it --rm \
     --volume="/tmp/.X11-unix:/tmp/.X11-unix:rw" \
     assistive-manip-env /bin/bash
 ```
+
+* download the h36m dataset from here: https://drive.google.com/file/d/1lGbtOsasw5F2MjvwWd9AtzCXdIefvmpv/view?usp=sharing
+
+* unzip the dataset and place it following directory structure: AssistiveManipulation/deep_mimic/mocap/data
 
 ## How to visualize the human motion from the dataset and collect the human joint limits
 
