@@ -92,7 +92,6 @@ class TargetsUtil:
         self.targets_upperarm = [t for i, t in enumerate(self.targets_upperarm) if i not in self.deleted_targets_indices_on_upperarm]
 
         assert len(self.targets_pos_on_upperarm) == len(self.targets_pos_upperarm_world) == len(self.targets_orn_upperarm_world) == len(self.targets_upperarm)
-        # print(f'upperarm: {len(self.targets_pos_on_upperarm)}, {len(self.targets_pos_upperarm_world)}, {len(self.targets_orn_upperarm_world)}, {len(self.targets_upperarm)}')
 
         # remove forearm targets
         remove_targets_forearm = []
@@ -105,7 +104,6 @@ class TargetsUtil:
         self.targets_forearm = [t for i, t in enumerate(self.targets_forearm) if i not in self.deleted_targets_indices_on_forearm]
 
         assert len(self.targets_pos_on_forearm) == len(self.targets_pos_forearm_world) == len(self.targets_orn_forearm_world) == len(self.targets_forearm)
-        # print(f'upperarm: {len(self.targets_pos_on_forearm)}, {len(self.targets_pos_forearm_world)}, {len(self.targets_orn_forearm_world)}, {len(self.targets_forearm)}')
 
         # # remove from simulation
         # for target in remove_targets_upperarm:
@@ -249,12 +247,12 @@ class TargetsUtil:
 
         # check both x and y axis
         for axis in self.target_axis_trial_order:
-            if len(self.targets_pos_on_upperarm) <= 6:
-                front_targets_on_upperarm_indices = [i for i, pos in enumerate(self.targets_pos_on_upperarm)]
+            if len(self.targets_pos_on_upperarm) <= 15:  ## 1/3 left
+                front_targets_on_upperarm_indices = [i for i in range(len(self.targets_pos_on_upperarm))]
                 back_targets_on_upperarm_indices = front_targets_on_upperarm_indices
             else:
                 front_targets_on_upperarm_indices, back_targets_on_upperarm_indices = split_half(self.targets_pos_on_upperarm, axis)
-            if len(self.targets_pos_on_forearm) <= 6:
+            if len(self.targets_pos_on_forearm) <= 10:   ## 1/3 left
                 front_targets_on_forearm_indices = [i for i, pos in enumerate(self.targets_pos_on_forearm)]
                 back_targets_on_forearm_indices = front_targets_on_forearm_indices
             else:
@@ -293,7 +291,9 @@ class TargetsUtil:
 
                 # compute world_to_target_point
                 world_to_target_points = [[targets_pos_world[0], targets_orn_world[0]],
+                                          [targets_pos_world[len(targets_pos_world)//4], targets_orn_world[len(targets_orn_world)//4]],
                                           [targets_pos_world[len(targets_pos_world)//2], targets_orn_world[len(targets_orn_world)//2]],
+                                          [targets_pos_world[(len(targets_pos_world)*3)//4], targets_orn_world[(len(targets_orn_world)*3)//4]],
                                           [targets_pos_world[-1], targets_orn_world[-1]]]
 
                 for world_to_target_point in world_to_target_points:

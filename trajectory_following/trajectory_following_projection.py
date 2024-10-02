@@ -9,7 +9,7 @@ os.sys.path.insert(0, parentdir)
 from scipy.spatial.transform import Rotation as R
 # from scipy.optimize import minimize
 # from autograd_minimize import minimize
-from torchmin import minimize_constr
+# from torchmin import minimize_constr
 
 import pybullet as p
 import pybullet_data

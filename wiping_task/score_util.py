@@ -88,18 +88,26 @@ class ScoreUtil:
             for i, joint_id in enumerate(self.robot_2.arm_controllable_joints):
                 p.resetJointState(self.robot_2.id, joint_id, q_robot_2_closer[i], physicsClientId=self.pid)
 
+            # # check if config is valid
+            # eef_pos = p.getLinkState(self.robot_2.id, self.robot_2.eef_id, computeForwardKinematics=True, physicsClientId=self.pid)[0]
+            # dist = np.linalg.norm(np.array(world_to_eef[0]) - np.array(eef_pos))
+            # if dist > 0.03 or self.robot_2_in_collision(q_robot_2_closer):
+            #     continue
+
             # check if config is valid
-            eef_pos = p.getLinkState(self.robot_2.id, self.robot_2.eef_id, computeForwardKinematics=True, physicsClientId=self.pid)[0]
-            dist = np.linalg.norm(np.array(world_to_eef[0]) - np.array(eef_pos))
-            if dist > 0.03 or self.robot_2_in_collision(q_robot_2_closer):
+            eef_pose = p.getLinkState(self.robot_2.id, self.robot_2.eef_id, computeForwardKinematics=True, physicsClientId=self.pid)[:2]
+            pos_dist = np.linalg.norm(np.array(world_to_eef[0]) - np.array(eef_pose[0]))
+            dot_product = np.abs(np.dot(world_to_eef[1], eef_pose[1]))
+            orn_dist = 2 * np.arccos(np.clip(dot_product, -1.0, 1.0))
+            if self.robot_2_in_collision(q_robot_2_closer) or pos_dist > 0.02 or orn_dist > np.deg2rad(15):
                 continue
 
             # target is reachable
             reachable_targets_count += 1
 
-        score = reachable_targets_count/self.total_targets
-        return score
-        # return reachable_targets_count
+        # score = reachable_targets_count/self.total_targets
+        # return score
+        return reachable_targets_count
     
     def compute_score_by_closeness(self, q_H_init, q_H_goal):
         dist = np.linalg.norm(np.array(q_H_init) - np.array(q_H_goal))

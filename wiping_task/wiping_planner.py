@@ -70,7 +70,7 @@ class WipingDemo():
 
         # load environment
         plane_id = self.bc.loadURDF("plane.urdf", (0, 0, -0.04), physicsClientId=self.bc._client)
-        self.bed_id = self.bc.loadURDF("./urdf/bed_0.urdf", (0.0, -0.1, 0.0), useFixedBase=True, physicsClientId=self.bc._client)
+        self.bed_id = self.bc.loadURDF("./urdf/bed_0.urdf", (0.0, -0.1, 0.0), useFixedBase=True)
 
         # load human
         human_base_pos = (0, 0, 0.3)
@@ -88,7 +88,6 @@ class WipingDemo():
         self.human_rest_poses = [2.4790802489002552, -0.01642306738465106, -1.8128412472566666, 0.4529190452054409]
 
         # load first robot (manipulation)
-        # self.robot_base_pose = ((0.65, 0.7, 0.25), (0, 0, -1.57))
         self.robot_base_pose = ((0.5, 0.8, 0.25), (0, 0, 0))
         self.cube_id = self.bc.loadURDF("./urdf/cube_0.urdf", 
                                    (self.robot_base_pose[0][0], self.robot_base_pose[0][1], self.robot_base_pose[0][2]-0.15), useFixedBase=True)
@@ -213,9 +212,11 @@ class WipingDemo():
             self.bc.stepSimulation(physicsClientId=self.bc._client)
 
             # check if config is valid
-            eef_pos = p.getLinkState(self.robot_2.id, self.robot_2.eef_id, computeForwardKinematics=True, physicsClientId=self.bc._client)[0]
-            dist = np.linalg.norm(np.array(world_to_eef[0]) - np.array(eef_pos))
-            if not self.robot_2_in_collision(q_robot_2_closer) and dist < 0.035:
+            eef_pose = p.getLinkState(self.robot_2.id, self.robot_2.eef_id, computeForwardKinematics=True, physicsClientId=self.bc._client)[:2]
+            pos_dist = np.linalg.norm(np.array(world_to_eef[0]) - np.array(eef_pose[0]))
+            dot_product = np.abs(np.dot(world_to_eef[1], eef_pose[1]))
+            orn_dist = 2 * np.arccos(np.clip(dot_product, -1.0, 1.0))
+            if not self.robot_2_in_collision(q_robot_2_closer) and pos_dist <= 0.02 and orn_dist < np.deg2rad(15):
                 robot_traj.append(q_robot_2_closer)
 
             prev_target_pos_world = target_pos_world
@@ -250,16 +251,7 @@ class WipingDemo():
         for i, j in enumerate(self.human_controllable_joints):
             self.bc.resetJointState(self.humanoid._humanoid, j, q_human[i], physicsClientId=self.bc._client)
 
-    def lock_human_joints(self, q_human):
-        # Make all joints on the person static by setting mass of each link (joint) to 0
-        for j in range(self.bc.getNumJoints(self.humanoid._humanoid, physicsClientId=self.bc._client)):
-            self.bc.changeDynamics(self.humanoid._humanoid, j, mass=0, physicsClientId=self.bc._client)
-        # Set arm joints velocities to 0
-        for i, j in enumerate(self.human_controllable_joints):
-            self.bc.resetJointState(self.humanoid._humanoid, jointIndex=j, targetValue=q_human[i], targetVelocity=0, physicsClientId=self.bc._client)
-
     def generate_random_q_H(self):
-        # q_H_1 = np.random.uniform(-3.14, 3.14)
         q_H_1 = np.random.uniform(0, 3.14)
         q_H_2 = np.random.uniform(-0.24, 1.23)
         q_H_3 = np.random.uniform(-2.66, -1.32)
@@ -270,7 +262,6 @@ class WipingDemo():
         """Check if any part of the human arm collides with other objects."""
         contact_points = self.bc.getContactPoints(bodyA=self.humanoid._humanoid, physicsClientId=self.bc._client)
         for point in contact_points:
-            # if (point[2] in [self.bed_id, self.cube_id, self.cube_2_id, self.robot_2.id]):
             if (point[2] in [self.bed_id]):
                 return True
         return False
@@ -286,20 +277,53 @@ class WipingDemo():
                 world_to_right_elbow = self.bc.getLinkState(self.humanoid._humanoid, self.right_elbow)[:2]
                 return q_H, world_to_right_elbow
         raise ValueError('valid human config not found!')
-        # return q_H, world_to_right_elbow
 
-        # q_H = self.generate_random_q_H()
-        # self.reset_human_arm(q_H)
-        # world_to_right_elbow = self.bc.getLinkState(self.humanoid._humanoid, self.right_elbow)[:2]
-        # return q_H, world_to_right_elbow
+    def lock_human_joints(self, q_human):
+        # Save original mass of each joint to restore later
+        self.human_joint_masses = []
+        for j in range(self.bc.getNumJoints(self.humanoid._humanoid, physicsClientId=self.bc._client)):
+            # Get the current dynamics info to save mass
+            dynamics_info = self.bc.getDynamicsInfo(self.humanoid._humanoid, j, physicsClientId=self.bc._client)
+            self.human_joint_masses.append(dynamics_info[0])  # Save mass (first item in tuple is mass)
+            # Set mass to 0 to lock the joint
+            self.bc.changeDynamics(self.humanoid._humanoid, j, mass=0, physicsClientId=self.bc._client)
+        
+        # Set arm joints velocities to 0
+        for i, j in enumerate(self.human_controllable_joints):
+            self.bc.resetJointState(self.humanoid._humanoid, jointIndex=j, targetValue=q_human[i], targetVelocity=0, physicsClientId=self.bc._client)
 
     def lock_robot_arm_joints(self, robot, q_robot):
-        # Make all joints static by setting mass of each link (joint) to 0
+        # Save original mass of each joint to restore later
+        self.robot_joint_masses = []
         for j in range(self.bc.getNumJoints(robot.id, physicsClientId=self.bc._client)):
+            dynamics_info = self.bc.getDynamicsInfo(robot.id, j, physicsClientId=self.bc._client)
+            self.robot_joint_masses.append(dynamics_info[0])  # Save mass
+            # Set mass to 0 to lock the joint
             self.bc.changeDynamics(robot.id, j, mass=0, physicsClientId=self.bc._client)
+        
         # Set arm joints velocities to 0
         for i, joint_id in enumerate(robot.arm_controllable_joints):
             self.bc.resetJointState(self.robot.id, jointIndex=joint_id, targetValue=q_robot[i], targetVelocity=0, physicsClientId=self.bc._client)
+
+    def unlock_human_joints(self, q_human):
+        # Restore the original mass for each joint to make them active
+        for j in range(self.bc.getNumJoints(self.humanoid._humanoid, physicsClientId=self.bc._client)):
+            original_mass = self.human_joint_masses[j]
+            self.bc.changeDynamics(self.humanoid._humanoid, j, mass=original_mass, physicsClientId=self.bc._client)
+        
+        # Restore the velocities
+        for i, j in enumerate(self.human_controllable_joints):
+            self.bc.resetJointState(self.humanoid._humanoid, jointIndex=j, targetValue=q_human[i], physicsClientId=self.bc._client)
+
+    def unlock_robot_arm_joints(self, robot, q_robot):
+        # Restore the original mass for each joint to make them active
+        for j in range(self.bc.getNumJoints(robot.id, physicsClientId=self.bc._client)):
+            original_mass = self.robot_joint_masses[j]
+            self.bc.changeDynamics(robot.id, j, mass=original_mass, physicsClientId=self.bc._client)
+        
+        # Restore the velocities
+        for i, joint_id in enumerate(robot.arm_controllable_joints):
+            self.bc.resetJointState(self.robot.id, jointIndex=joint_id, targetValue=q_robot[i], physicsClientId=self.bc._client)
 
     def get_robot_joint_angles(self, robot):
         current_joint_angles = []
@@ -457,6 +481,46 @@ class WipingDemo():
             return valid_grasp
         
         return valid_grasp
+    
+    def validate_q_R(self, q_H, q_R, check_goal=False):
+        # feasibility check
+        if min(q_R) < min(self.robot.arm_lower_limits) or max(q_R) > max(self.robot.arm_upper_limits):
+            return False
+        
+        self.reset_robot(self.robot, q_R)
+        self.robot_2.reset()
+        self.reset_human_arm(q_H)
+        
+        world_to_right_elbow = self.bc.getLinkState(self.humanoid._humanoid, self.right_elbow)[:2]
+        world_to_cp = self.bc.multiplyTransforms(world_to_right_elbow[0], world_to_right_elbow[1],
+                                                 self.right_elbow_to_cp[0], self.right_elbow_to_cp[1])
+        cp_to_world = self.bc.invertTransform(world_to_cp[0], world_to_cp[1])
+        eef_to_world = self.bc.multiplyTransforms(self.eef_to_cp[0], self.eef_to_cp[1],
+                                                cp_to_world[0], cp_to_world[1])
+        world_to_eef = self.bc.invertTransform(eef_to_world[0], eef_to_world[1])
+        
+        # collision check
+        if self.robot_in_collision(q_R):
+            return False
+
+        # reachability check
+        eef_pose = self.bc.getLinkState(self.robot.id, self.robot.eef_id)[:2]
+        dist = np.linalg.norm(np.array(world_to_eef[0]) - np.array(eef_pose[0]))
+        if dist > 0.03:
+            return False
+
+        if check_goal:
+            # distance to human check
+            dist = self.get_human_to_robot_dist(q_H=q_H, q_robot=q_R)
+            if dist <= 0.05:
+                return False
+
+            # distance check from robot to bed (exclude gripper fingers)
+            dist = self.get_bed_to_robot_dist(q_robot=q_R)
+            if dist <= 0.03:
+                return False
+        
+        return True
 
     def get_init_traj_from_q_H(self, q_H_init, q_H_goal, q_R_init):
         q_H_traj = []
@@ -529,12 +593,23 @@ class WipingDemo():
         q_H_goals = list(q_H_goals)
         q_R_goals = list(q_R_goals)
 
+        # validate each waypoint
+        for idx, (q_H_traj, q_R_traj) in enumerate(zip(q_H_trajs, q_R_trajs)):
+            is_valid = True
+            for q_H, q_R in zip(q_H_traj, q_R_traj):
+                self.reset_human_arm(q_H)
+                self.reset_robot(self.robot, q_R)
+                is_valid = is_valid and self.validate_q_R(q_H, q_R)
+            if is_valid:
+                print(idx)
+                break
+
         # reset environment
         self.lock_human_joints(q_H_init)
         self.lock_robot_arm_joints(self.robot, q_robot)
         self.reset_robot(self.robot_2, q_robot_2)
 
-        return q_H_scores[0], q_H_trajs[0], q_R_trajs[0], q_H_goals[0], q_R_goals[0]
+        return q_H_scores[idx], q_H_trajs[idx], q_R_trajs[idx], q_H_goals[idx], q_R_goals[idx]
 
 
 if __name__ == '__main__':
@@ -606,12 +681,15 @@ if __name__ == '__main__':
 
     for i in range(50):
         env.bc.configureDebugVisualizer(flag=p.COV_ENABLE_RENDERING, enable=0)
-        q_H_goals, world_to_right_elbows, q_H_scores, q_R_goals, world_to_eef_goals = env.get_best_valid_q_H(q_H_init=q_H_init, q_robot=q_robot_init, q_robot_2=q_robot_2_init)
+        # q_H_goals, world_to_right_elbows, q_H_scores, q_R_goals, world_to_eef_goals = env.get_best_valid_q_H(q_H_init=q_H_init, q_robot=q_robot_init, q_robot_2=q_robot_2_init)
+        q_H_score, q_H_traj, q_R_traj, q_H_goal, q_R_goal = env.get_best_valid_goal_configs(q_H_init=q_H_init, 
+                                                                                            q_robot=q_robot_init, 
+                                                                                            q_robot_2=q_robot_2_init)
         env.bc.configureDebugVisualizer(flag=p.COV_ENABLE_RENDERING, enable=1)
-        env.lock_human_joints(q_H_goals[0])
-        env.reset_robot(env.robot, q_R_goals[0])
-        q_H = q_H_goals[0]
-        print('q_H score: ', q_H_scores[0])
+        env.lock_human_joints(q_H_goal)
+        env.reset_robot(env.robot, q_R_goal)
+        q_H = q_H_goal
+        print('q_H score: ', q_H_score)
         
         ### 2: test feasible targets selection
         arms = ['upperarm', 'forearm']

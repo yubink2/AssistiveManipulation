@@ -1,0 +1,15 @@
+package.xml
+setup.py
+csdf/__init__.py
+csdf/pointcloud_sdf.py
+csdf.egg-info/PKG-INFO
+csdf.egg-info/SOURCES.txt
+csdf.egg-info/dependency_links.txt
+csdf.egg-info/requires.txt
+csdf.egg-info/top_level.txt
+csdf.egg-info/zip-safe
+csdf/utils/__init__.py
+csdf/utils/chamfer_distance.py
+resource/__init__.py
+resource/csdf
+resource/models/__init__.py

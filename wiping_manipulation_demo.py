@@ -63,6 +63,7 @@ LINK_SKELETON = [
 def wiping_loop(wiping_env, manip_env, q_H, total_targets_cleared, q_robot, q_robot_2_init):
     # initialize environments
     current_joint_angles = q_robot_2_init
+    manip_env.lock_human_joints(q_H)  ####
     manip_env.targets_util.update_targets()
     wiping_env.lock_robot_arm_joints(wiping_env.robot, q_robot)
 
@@ -81,8 +82,11 @@ def wiping_loop(wiping_env, manip_env, q_H, total_targets_cleared, q_robot, q_ro
                 print(f'{arm} valid trajectory not found!')
                 continue
 
+            if len(robot_traj) <= 5:
+                robot_traj.extend(robot_traj[::-1])
+
             robot_traj = wiping_env.interpolate_trajectory(robot_traj, alpha=0.5)
-            robot_traj = wiping_env.interpolate_trajectory(robot_traj, alpha=0.25)
+            robot_traj = wiping_env.interpolate_trajectory(robot_traj, alpha=0.5)
 
             # compute feasible targets parameters
             feasible_targets_pos_world, feasible_targets_orn_world, feasible_targets_count, feasible_targets_indices, init_q_R, arm_side = wiping_env.targets_util.get_feasible_targets_lists()
@@ -92,7 +96,7 @@ def wiping_loop(wiping_env, manip_env, q_H, total_targets_cleared, q_robot, q_ro
 
             # move robot_2 to wiping initial config
             manip_env.reset_robot(manip_env.robot_2, robot_traj[0])   ####
-            manip_env.attach_tool()
+            manip_env.attach_tool()  ####
             eef_goal_pose = wiping_env.get_eef_pose(robot=wiping_env.robot_2, 
                                                     current_joint_angles=current_joint_angles, target_joint_angles=robot_traj[0])
             # move_robot_loop(manip_env, robot=manip_env.robot_2, other_robot=manip_env.robot, 
@@ -102,13 +106,10 @@ def wiping_loop(wiping_env, manip_env, q_H, total_targets_cleared, q_robot, q_ro
             # execute wiping trajectory
             for q_R in robot_traj:
                 for _ in range(50):
-                    if manip_env.human_cid is None:
-                        manip_env.move_human_arm(q_H)
-                    # manip_env.move_human_arm(q_H)  ####
                     manip_env.move_robot(manip_env.robot_2, q_R)
                     manip_env.move_robot(manip_env.robot, q_robot)
                     manip_env.bc.stepSimulation()
-                # time.sleep(0.1)
+                time.sleep(0.05)
                 new_target, indices_to_delete = manip_env.targets_util.get_new_contact_points(targeted_arm=arm)
                 manip_env.targets_util.remove_contacted_feasible_targets(indices_to_delete, arm)
                 wiping_env.targets_util.remove_contacted_feasible_targets(indices_to_delete, arm)
@@ -119,7 +120,7 @@ def wiping_loop(wiping_env, manip_env, q_H, total_targets_cleared, q_robot, q_ro
             manip_env.targets_util.remove_targets()
             manip_env.targets_util.unmark_feasible_targets()
             manip_env.targets_util.update_targets()
-            manip_env.detach_tool()
+            manip_env.detach_tool()  ####
 
             wiping_env.targets_util.remove_targets()
             wiping_env.targets_util.update_targets()
@@ -134,6 +135,8 @@ def wiping_loop(wiping_env, manip_env, q_H, total_targets_cleared, q_robot, q_ro
     #                 q_robot_init=current_joint_angles, q_robot_goal=q_robot_2_init, world_to_robot_eef_goal=eef_goal_pose,
     #                 q_other_robot=q_robot, q_H=q_H)
     wiping_env.reset_robot(wiping_env.robot_2, q_robot_2_init)
+
+    manip_env.unlock_human_joints(q_H)  ####
 
     print('wiping loop is done')
     return targets_cleared, total_targets_cleared
@@ -276,7 +279,7 @@ def move_robot_loop(manip_env, robot, other_robot, q_robot_init, q_robot_goal, w
             break
 
         # get velocity command
-        next_joint_angles = trajectory_follower.follow_trajectory(current_joint_angles, current_human_joint_angles=[], time_step=0.05)[0]
+        next_joint_angles = trajectory_follower.follow_trajectory(current_joint_angles, current_human_joint_angles=[], time_step=0.05)
         current_time = time.time()
 
         # update trajectory 
@@ -310,6 +313,8 @@ if __name__ == '__main__':
     manip_env.reset()
     grasp_env.reset()
 
+    manip_env.lock_robot_gripper_joints(manip_env.robot)  ######
+
     # initial joint states
     q_robot_init = manip_env.robot.arm_rest_poses
     q_robot_2_init = manip_env.robot_2.arm_rest_poses
@@ -317,6 +322,7 @@ if __name__ == '__main__':
 
     ### grasp generation
     q_H_init = manip_env.human_rest_poses
+    print('generating grasps...')
     # q_R_grasp_samples, grasp_pose_samples, best_q_R_grasp, best_world_to_grasp, best_world_to_eef_goal = grasp_env.generate_grasps(q_H_init)
     # best_q_R_grasp = [-1.18542512, -1.75121252,  2.19404085, -1.71744685, -0.88838092,  0.31547203]
     # best_world_to_grasp = [[0.44916177, 0.34919802, 0.39658533], [ 0.83262646, -0.19758316, -0.48711703,  0.17438771]]
@@ -337,17 +343,17 @@ if __name__ == '__main__':
                                    right_elbow_joint_to_cp, cp_to_right_elbow_joint,
                                    right_wrist_joint_to_cp, cp_to_right_wrist_joint)
 
-    # ### 1st wiping iter (with rest poses)
-    # success_rate = 0.0
-    # total_targets_cleared = 0
-    # total_targets = wiping_env.targets_util.total_target_count
-    # manip_env.reset_human_arm(q_H_init)
+    ### 1st wiping iter (with rest poses)
+    success_rate = 0.0
+    total_targets_cleared = 0
+    total_targets = wiping_env.targets_util.total_target_count
+    manip_env.reset_human_arm(q_H_init)
 
-    # start_time = time.time()
-    # targets_cleared, total_targets_cleared = wiping_loop(wiping_env, manip_env, q_H_init, total_targets_cleared, 
-    #                                                      q_robot_init, q_robot_2_init)
-    # success_rate = total_targets_cleared/total_targets
-    # print(f'total_targets_cleared: {total_targets_cleared}/{total_targets}')
+    start_time = time.time()
+    targets_cleared, total_targets_cleared = wiping_loop(wiping_env, manip_env, q_H_init, total_targets_cleared, 
+                                                         q_robot_init, q_robot_2_init)
+    success_rate = total_targets_cleared/total_targets
+    print(f'total_targets_cleared: {total_targets_cleared}/{total_targets}')
 
     # simulation loop until threshold is met...
     current_human_joint_angles = q_H_init
@@ -362,6 +368,8 @@ if __name__ == '__main__':
         #     move_robot_loop(manip_env, robot=manip_env.robot, other_robot=manip_env.robot_2, 
         #                     q_robot_init=current_joint_angles, q_robot_goal=target_joint_angles, world_to_robot_eef_goal=best_world_to_eef_goal,
         #                     q_other_robot=current_robot_2_joint_angles, q_H=current_human_joint_angles)
+        #     manip_env.reset_human_arm(q_H_init)
+        #     manip_env.reset_robot(manip_env.robot, best_q_R_grasp)
         #     current_joint_angles = manip_env.get_robot_joint_angles(manip_env.robot)
 
         # reset to grasp pose
@@ -398,21 +406,22 @@ if __name__ == '__main__':
         # current_human_joint_angles = manip_env.get_human_joint_angles()
         # current_joint_angles = manip_env.get_robot_joint_angles(manip_env.robot)
 
-        # ### n-th wiping iter
-        # targets_cleared, total_targets_cleared = wiping_loop(wiping_env, manip_env, current_human_joint_angles, total_targets_cleared, 
-        #                                                      q_robot=current_joint_angles, q_robot_2_init=current_robot_2_joint_angles)
+        ### n-th wiping iter
+        targets_cleared, total_targets_cleared = wiping_loop(wiping_env, manip_env, current_human_joint_angles, total_targets_cleared, 
+                                                             q_robot=current_joint_angles, q_robot_2_init=current_robot_2_joint_angles)
 
-        # # check if wiping threshold is reached
-        # success_rate = total_targets_cleared/total_targets
-        # print(f'success_rate: {success_rate}, new targets cleared: {targets_cleared}, total_targets_cleared: {total_targets_cleared}/{total_targets}')
-        # if success_rate >= 0.8:
-        #     break
+        # check if wiping threshold is reached
+        success_rate = total_targets_cleared/total_targets
+        print(f'iter {i+1} | success_rate: {success_rate}, new targets cleared: {targets_cleared}, total_targets_cleared: {total_targets_cleared}/{total_targets}')
+        if success_rate >= 0.8:
+            break
 
         # save states
         current_human_joint_angles = manip_env.get_human_joint_angles()
         current_joint_angles = manip_env.get_robot_joint_angles(manip_env.robot)
-        current_robot_2_joint_angles = manip_env.get_robot_joint_angles(manip_env.robot_2)      
+        current_robot_2_joint_angles = manip_env.get_robot_joint_angles(manip_env.robot_2)
     
+    # end of the simulation loop
     total_time = time.time() - start_time
     print(f'success_rate: {success_rate}, total_targets_cleared: {total_targets_cleared}/{total_targets}')
     print(f'iteration: {i}, total simulation time: {total_time}')

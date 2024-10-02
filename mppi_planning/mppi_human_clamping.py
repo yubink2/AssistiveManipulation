@@ -75,7 +75,7 @@ class MPPI_H_Clamp():
             # get eef pose from q_R
             for i, joint in enumerate(self.robot.arm_controllable_joints):
                 self.bc_second.resetJointState(self.robot.id, joint, q_R[i])
-            self.bc_second.stepSimulation()
+            # self.bc_second.stepSimulation()
             world_to_eef = self.bc_second.getLinkState(self.robot.id, self.robot.eef_id)[:2]
 
             # get cp pose
@@ -98,7 +98,7 @@ class MPPI_H_Clamp():
             self.bc_second.resetJointState(self.humanoid._humanoid, self.right_shoulder_p, q_H[1])
             self.bc_second.resetJointState(self.humanoid._humanoid, self.right_shoulder_r, q_H[2])
             self.bc_second.resetJointState(self.humanoid._humanoid, self.right_elbow, q_H[3])
-            self.bc_second.stepSimulation()
+            # self.bc_second.stepSimulation()
             world_to_right_elbow_joint_actual = self.bc_second.getLinkState(self.humanoid._humanoid, self.right_elbow)[4:6]
             world_to_cp = self.bc_second.multiplyTransforms(world_to_right_elbow_joint_actual[0], world_to_right_elbow_joint_actual[1],
                                                             self.right_elbow_joint_to_cp[0], self.right_elbow_joint_to_cp[1])

@@ -7,7 +7,6 @@ parentdir = os.path.dirname(currentdir)
 os.sys.path.insert(0, parentdir)
 
 import numpy as np
-from urdfpy import URDF
 from scipy.spatial.transform import Rotation as R
 import time
 

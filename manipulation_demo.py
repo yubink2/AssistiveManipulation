@@ -113,7 +113,7 @@ class ManipulationDemo():
 
         # load environment
         plane_id = self.bc.loadURDF("plane.urdf", (0, 0, -0.04))
-        self.bed_id = self.bc.loadURDF("./urdf/bed_0.urdf", (0.0, -0.1, 0.0), useFixedBase=True)  # bed
+        self.bed_id = self.bc.loadURDF("./urdf/bed_0.urdf", (0.0, -0.1, 0.0), useFixedBase=True)
         self.human_cid = None
         self.tool_cid = None
 
@@ -136,7 +136,6 @@ class ManipulationDemo():
         self.T_world_to_human_base = compute_matrix(translation=human_base[0], rotation=human_base[1])
 
         # load first robot (manipulation)
-        # self.robot_base_pose = ((0.65, 0.7, 0.25), (0, 0, -1.57))
         self.robot_base_pose = ((0.5, 0.8, 0.25), (0, 0, 0))
         self.cube_id = self.bc.loadURDF("./urdf/cube_0.urdf", 
                                    (self.robot_base_pose[0][0], self.robot_base_pose[0][1], self.robot_base_pose[0][2]-0.15), useFixedBase=True)
@@ -241,7 +240,7 @@ class ManipulationDemo():
         
         # compute eef_to_cp
         self.reset_robot(self.robot, q_R_grasp)
-        world_to_eef = self.bc.getLinkState(self.robot.id, self.robot.eef_id)
+        world_to_eef = self.bc.getLinkState(self.robot.id, self.robot.eef_id)[:2]
         eef_to_world = self.bc.invertTransform(world_to_eef[0], world_to_eef[1])
         eef_to_cp = self.bc.multiplyTransforms(eef_to_world[0], eef_to_world[1],
                                                world_to_cp[0], world_to_cp[1])
@@ -478,10 +477,14 @@ class ManipulationDemo():
     def reset_robot(self, robot, q_robot):
         for i, joint_id in enumerate(robot.arm_controllable_joints):
             self.bc.resetJointState(robot.id, joint_id, q_robot[i])
+        for j in range(robot.eef_base_id, self.bc.getNumJoints(robot.id, physicsClientId=self.bc._client)):
+            self.bc.resetJointState(robot.id, j, 0.0)
 
     def move_robot(self, robot, q_robot):
         for i, joint_id in enumerate(robot.arm_controllable_joints):
             self.bc.setJointMotorControl2(robot.id, joint_id, p.POSITION_CONTROL, q_robot[i])
+        for j in range(robot.eef_base_id, self.bc.getNumJoints(robot.id, physicsClientId=self.bc._client)):
+            self.bc.setJointMotorControl2(robot.id, j, p.POSITION_CONTROL, 0.0)
 
     def reset_human_arm(self, q_human):
         for i, j in enumerate(self.human_controllable_joints):
@@ -532,12 +535,56 @@ class ManipulationDemo():
             self.bc.changeDynamics(self.humanoid._humanoid, j, mass=0.00001, physicsClientId=self.bc._client)
         
     def lock_human_joints(self, q_human):
-        # Make all joints on the person static by setting mass of each link (joint) to 0
+        # Save original mass of each joint to restore later
+        self.human_joint_masses = []
         for j in range(self.bc.getNumJoints(self.humanoid._humanoid, physicsClientId=self.bc._client)):
+            # Get the current dynamics info to save mass
+            dynamics_info = self.bc.getDynamicsInfo(self.humanoid._humanoid, j, physicsClientId=self.bc._client)
+            self.human_joint_masses.append(dynamics_info[0])  # Save mass (first item in tuple is mass)
+            # Set mass to 0 to lock the joint
             self.bc.changeDynamics(self.humanoid._humanoid, j, mass=0, physicsClientId=self.bc._client)
+        
         # Set arm joints velocities to 0
         for i, j in enumerate(self.human_controllable_joints):
             self.bc.resetJointState(self.humanoid._humanoid, jointIndex=j, targetValue=q_human[i], targetVelocity=0, physicsClientId=self.bc._client)
+
+    def lock_robot_arm_joints(self, robot, q_robot):
+        # Save original mass of each joint to restore later
+        self.robot_joint_masses = []
+        for j in range(self.bc.getNumJoints(robot.id, physicsClientId=self.bc._client)):
+            dynamics_info = self.bc.getDynamicsInfo(robot.id, j, physicsClientId=self.bc._client)
+            self.robot_joint_masses.append(dynamics_info[0])  # Save mass
+            # Set mass to 0 to lock the joint
+            self.bc.changeDynamics(robot.id, j, mass=0, physicsClientId=self.bc._client)
+        
+        # Set arm joints velocities to 0
+        for i, joint_id in enumerate(robot.arm_controllable_joints):
+            self.bc.resetJointState(robot.id, jointIndex=joint_id, targetValue=q_robot[i], targetVelocity=0, physicsClientId=self.bc._client)
+        
+    def lock_robot_gripper_joints(self, robot):
+        # Set arm joints velocities to 0
+        for j in range(robot.eef_base_id, self.bc.getNumJoints(robot.id, physicsClientId=self.bc._client)):
+            self.bc.resetJointState(robot.id, jointIndex=j, targetValue=0, targetVelocity=0, physicsClientId=self.bc._client)
+
+    def unlock_human_joints(self, q_human):
+        # Restore the original mass for each joint to make them active
+        for j in range(self.bc.getNumJoints(self.humanoid._humanoid, physicsClientId=self.bc._client)):
+            original_mass = self.human_joint_masses[j]
+            self.bc.changeDynamics(self.humanoid._humanoid, j, mass=original_mass, physicsClientId=self.bc._client)
+        
+        # Restore the velocities
+        for i, j in enumerate(self.human_controllable_joints):
+            self.bc.resetJointState(self.humanoid._humanoid, jointIndex=j, targetValue=q_human[i], physicsClientId=self.bc._client)
+
+    def unlock_robot_arm_joints(self, robot, q_robot):
+        # Restore the original mass for each joint to make them active
+        for j in range(self.bc.getNumJoints(robot.id, physicsClientId=self.bc._client)):
+            original_mass = self.robot_joint_masses[j]
+            self.bc.changeDynamics(robot.id, j, mass=original_mass, physicsClientId=self.bc._client)
+        
+        # Restore the velocities
+        for i, joint_id in enumerate(robot.arm_controllable_joints):
+            self.bc.resetJointState(robot.id, jointIndex=joint_id, targetValue=q_robot[i], physicsClientId=self.bc._client)
 
     def generate_random_q_H(self):
         q_H_1 = np.random.uniform(-3.14, 3.14)

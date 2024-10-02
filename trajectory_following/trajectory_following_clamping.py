@@ -70,7 +70,6 @@ class TrajectoryFollower_H_Clamp():
         # get eef pose from q_R
         for i, joint in enumerate(self.robot.arm_controllable_joints):
             self.bc_second.resetJointState(self.robot.id, joint, q_R[i])
-        self.bc_second.stepSimulation()
         world_to_eef = self.bc_second.getLinkState(self.robot.id, self.robot.eef_id)[:2]
 
         # get cp pose
@@ -86,13 +85,13 @@ class TrajectoryFollower_H_Clamp():
                                                         jointRanges=self.human_arm_joint_ranges, restPoses=self.human_rest_poses,
                                                         maxNumIterations=50
                                                         )
+        q_H = np.clip(q_H, self.human_arm_lower_limits, self.human_arm_upper_limits)
 
         # move humanoid in the 2nd server, get new cp pose
         self.bc_second.resetJointState(self.humanoid._humanoid, self.right_shoulder_y, q_H[0])
         self.bc_second.resetJointState(self.humanoid._humanoid, self.right_shoulder_p, q_H[1])
         self.bc_second.resetJointState(self.humanoid._humanoid, self.right_shoulder_r, q_H[2])
         self.bc_second.resetJointState(self.humanoid._humanoid, self.right_elbow, q_H[3])
-        self.bc_second.stepSimulation()
         world_to_right_elbow_joint = self.bc_second.getLinkState(self.humanoid._humanoid, self.right_elbow)[4:6]
         world_to_cp = self.bc_second.multiplyTransforms(world_to_right_elbow_joint[0], world_to_right_elbow_joint[1],
                                                         self.right_elbow_joint_to_cp[0], self.right_elbow_joint_to_cp[1])
@@ -102,10 +101,18 @@ class TrajectoryFollower_H_Clamp():
                                                         self.cp_to_eef[0], self.cp_to_eef[1])
 
         # IK -> get new robot joint angles
-        q_R = self.bc_second.calculateInverseKinematics(self.robot.id, self.robot.eef_id, world_to_eef[0], world_to_eef[1],
+        q_R_handshake = self.bc_second.calculateInverseKinematics(self.robot.id, self.robot.eef_id, world_to_eef[0], world_to_eef[1],
                                                         lowerLimits=self.robot.arm_lower_limits, upperLimits=self.robot.arm_upper_limits, 
                                                         jointRanges=self.robot.arm_joint_ranges, restPoses=self.robot_rest_poses,
                                                         maxNumIterations=50)
-        q_R = [q_R[i] for i in range(len(self.robot.arm_controllable_joints))]
+        q_R_handshake = [q_R_handshake[i] for i in range(len(self.robot.arm_controllable_joints))]
+
+        for i, joint in enumerate(self.robot.arm_controllable_joints):
+            self.bc_second.resetJointState(self.robot.id, joint, q_R[i])
+        eef_pose = self.bc_second.getLinkState(self.robot.id, self.robot.eef_id)[:2]
+
+        if np.linalg.norm(np.array(world_to_eef[0])-np.array(eef_pose[0])) > 0.05:
+            print('traj follower - handshake failed')
+            q_R_handshake = q_R
         
-        return q_R
+        return q_R_handshake

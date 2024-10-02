@@ -96,7 +96,6 @@ class GraspDemo():
         self.T_world_to_human_base = compute_matrix(translation=human_base[0], rotation=human_base[1])
 
         # load first robot (manipulation)
-        # self.robot_base_pose = ((0.65, 0.7, 0.25), (0, 0, -1.57))
         self.robot_base_pose = ((0.5, 0.8, 0.25), (0, 0, 0))
         self.cube_id = self.bc.loadURDF("./urdf/cube_0.urdf", 
                                    (self.robot_base_pose[0][0], self.robot_base_pose[0][1], self.robot_base_pose[0][2]-0.15), useFixedBase=True)
@@ -197,17 +196,17 @@ class GraspDemo():
                                                         self.robot.arm_joint_ranges, self.robot.arm_rest_poses,
                                                         maxNumIterations=50)
             q_R_grasp = [q_R_grasp[i] for i in range(len(self.robot.arm_controllable_joints))]
-            if q_R_grasp[-1] < -3.14:
-                q_R_grasp[-1] += 3.14
-            elif q_R_grasp[-1] > 3.14:
-                q_R_grasp[-1] -= 3.14
-            q_R_grasp = np.clip(q_R_grasp, self.robot.arm_lower_limits, self.robot.arm_upper_limits)
+            # if q_R_grasp[-1] < -3.14:
+            #     q_R_grasp[-1] += 3.14
+            # elif q_R_grasp[-1] > 3.14:
+            #     q_R_grasp[-1] -= 3.14
+            # q_R_grasp = np.clip(q_R_grasp, self.robot.arm_lower_limits, self.robot.arm_upper_limits)
 
             self.reset_robot(self.robot, q_R_grasp)
             eef_pose = self.bc.getLinkState(self.robot.id, self.robot.eef_id)[:2]
             dist = np.linalg.norm(np.array(world_to_eef[0]) - np.array(eef_pose[0]))
 
-            if not self.robot_in_collision(q_R_grasp) and dist <= 0.02:
+            if not self.robot_in_collision(q_R_grasp) and dist <= 0.01:
                 q_R_grasp_samples.append(q_R_grasp)
                 grasp_pose_samples.append([grasp[:3, 3], quaternion_from_matrix(grasp)])
                 world_to_eef_goals.append(world_to_eef)
