@@ -63,8 +63,11 @@ RUN pip install wheel
 RUN pip install pytorch-kinematics
 RUN pip install ipywidgets
 
-# Copy the extern directory into the Docker container
-COPY extern/ /app/extern/
+# Clone the AssistiveManipulation repository
+RUN git clone https://github.com/yubink2/AssistiveManipulation.git
+
+# Set the working directory to the cloned repository
+WORKDIR /app/AssistiveManipulation
 
 # Install the 'csdf' module from the 'extern/csdf' directory
 RUN (cd extern/csdf && pip install .)
