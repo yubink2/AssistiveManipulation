@@ -9,7 +9,7 @@ git clone https://github.com/yubink2/AssistiveManipulation.git
 
 * unzip the dataset and place it following directory structure: AssistiveManipulation/deep_mimic/mocap/data
 
-* * build the docker image
+* build the docker image
 ```
 docker build -t assistive-manip-env .
 ```
